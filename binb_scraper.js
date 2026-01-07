@@ -2,15 +2,17 @@ import puppeteer from 'puppeteer';
 import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
+import { formatTime, ProgressBar, clearLine } from './utils.js';
 
 class BinbScraper {
-  constructor(readerUrl) {
+  constructor(readerUrl, outputDir = './output', headless = true) {
     this.readerUrl = readerUrl;
     this.browser = null;
     this.page = null;
     this.imageRequests = []; // すべてのblob URLリクエストを記録
     this.currentImageIndex = 0; // 現在のインデックス
-    this.outputDir = './output';
+    this.outputDir = outputDir;
+    this.headless = headless;
   }
 
   async init() {
@@ -19,7 +21,7 @@ class BinbScraper {
     await fs.mkdir(this.outputDir, { recursive: true });
 
     this.browser = await puppeteer.launch({
-      headless: false,
+      headless: this.headless ? "new" : false,
       defaultViewport: { width: 1280, height: 800 },
       executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -184,38 +186,23 @@ class BinbScraper {
     return newImagesCount > 0; // 新しい画像が読み込まれたかを返す
   }
 
-  async close() {
-    if (this.browser) {
-      await this.browser.close();
-      console.log('\n👋 Browser closed');
-    }
-  }
-}
-
-async function main() {
-  const readerUrl = process.argv[2] || 'https://www.cmoa.jp/reader/sample/?title_id=299367&content_id=100002993670001';
-  const numPages = process.argv[3] ? parseInt(process.argv[3]) : null; // nullの場合は全ページ
-
-  console.log('╔══════════════════════════╗');
-  console.log('║   BINB Reader Scraper    ║');
-  console.log('╚══════════════════════════╝\n');
-  console.log(`📚 URL: ${readerUrl}`);
-  console.log(`📄 Pages to extract: ${numPages || 'All pages (until end)'}\n`);
-
-  const scraper = new BinbScraper(readerUrl);
-
-  try {
-    await scraper.init();
-    await scraper.loadReader();
-
-    console.log('\n' + '━'.repeat(50));
-    console.log('  EXTRACTING PAGES');
-    console.log('━'.repeat(50) + '\n');
-
-    // 初期ロードで先読みされたページを処理
-    // imageRequests配列から順番に3枚ずつ取得していく
+  async downloadAll(numPages = null) {
+    // プログレスバー用の変数
+    const startTime = Date.now();
     let pageNumber = 1;
     let continueProcessing = true;
+    const progressBar = new ProgressBar();
+
+    const updateProgress = () => {
+      const elapsed = progressBar.getElapsedTime();
+      const pagesCompleted = pageNumber - 1;
+      const pagesPerSec = pagesCompleted > 0 ? (pagesCompleted / (elapsed / 1000)).toFixed(1) : '0';
+      clearLine();
+      process.stdout.write(`${progressBar.getSpinnerFrame()} Processing... P${pagesCompleted}${numPages ? `/${numPages}` : ''} | ${formatTime(elapsed)} | ${pagesPerSec} p/s`);
+    };
+
+    // プログレスバー開始
+    progressBar.start(updateProgress);
 
     while (continueProcessing) {
       // numPagesが指定されている場合はそれを超えない
@@ -225,31 +212,100 @@ async function main() {
 
       // 次のページに必要な画像が足りない場合、ページめくりを実行
       const imagesNeeded = pageNumber * 3;
-      if (scraper.imageRequests.length < imagesNeeded) {
-        const hasMorePages = await scraper.nextPage();
+      if (this.imageRequests.length < imagesNeeded) {
+        const hasMorePages = await this.nextPage();
+
         if (!hasMorePages) {
-          console.log(`\n⚠️  Reached end of book at page ${pageNumber - 1}`);
+          progressBar.stop();
           break;
         }
       }
 
       // ページ画像を抽出
-      const { images } = await scraper.extractPageImages(pageNumber);
+      const { images } = await this.extractPageImages(pageNumber);
 
       if (images.length > 0) {
-        const result = await scraper.combineImages(images.map(img => img.buffer), pageNumber);
-        // シンプルな1行ログ
-        console.log(`Page ${String(pageNumber).padStart(3, ' ')} ✓  ${result.width}x${result.height}  (${result.elapsed}ms)`);
+        await this.combineImages(images.map(img => img.buffer), pageNumber);
         pageNumber++;
       } else {
-        console.log(`\n⚠️  No more images available (reached end at page ${pageNumber})`);
+        progressBar.stop();
         continueProcessing = false;
       }
     }
 
+    progressBar.stop();
     const totalPages = pageNumber - 1;
-    console.log('\n' + '━'.repeat(50));
-    console.log(`✅ Completed! ${totalPages} pages extracted`);
+    const totalTime = Date.now() - startTime;
+    const avgTimePerPage = totalPages > 0 ? totalTime / totalPages : 0;
+    const finalSpeed = totalPages > 0 ? (totalPages / (totalTime / 1000)).toFixed(1) : '0';
+
+    return {
+      totalPages,
+      totalTime,
+      avgTimePerPage,
+      finalSpeed
+    };
+  }
+
+  async close() {
+    if (this.browser) {
+      await this.browser.close();
+      console.log('\n👋 Browser closed');
+    }
+  }
+}
+
+async function main() {
+  // 引数をパース
+  const args = process.argv.slice(2);
+  let readerUrl = 'https://www.cmoa.jp/reader/sample/?title_id=299367&content_id=100002993670001';
+  let numPages = null;
+  let outputDir = './output';
+  let headless = true; // デフォルトはheadless
+
+  // オプション引数をパース
+  const positionalArgs = [];
+  for (const arg of args) {
+    if (arg.startsWith('--')) {
+      if (arg === '--show-browser' || arg === '--no-headless') {
+        headless = false;
+      } else if (arg.startsWith('--headless=')) {
+        const value = arg.split('=')[1];
+        headless = value !== 'false';
+      }
+    } else {
+      positionalArgs.push(arg);
+    }
+  }
+
+  // 位置引数を処理
+  if (positionalArgs[0]) readerUrl = positionalArgs[0];
+  if (positionalArgs[1]) numPages = parseInt(positionalArgs[1]);
+  if (positionalArgs[2]) outputDir = positionalArgs[2];
+
+  console.log('╔══════════════════════════╗');
+  console.log('║   BINB Reader Scraper    ║');
+  console.log('╚══════════════════════════╝\n');
+  console.log(`📚 URL: ${readerUrl}`);
+  console.log(`📄 Pages to extract: ${numPages || 'All pages (until end)'}`);
+  console.log(`📁 Output directory: ${outputDir}`);
+  console.log(`🖥️  Browser mode: ${headless ? 'Headless' : 'Visible'}\n`);
+
+  const scraper = new BinbScraper(readerUrl, outputDir, headless);
+
+  try {
+    await scraper.init();
+    await scraper.loadReader();
+
+    console.log('━'.repeat(50));
+    console.log('  EXTRACTING PAGES');
+    console.log('━'.repeat(50));
+
+    // すべてのページをダウンロード
+    const result = await scraper.downloadAll(numPages);
+    
+    console.log('✅ Completed!');
+    console.log(`📄 ${result.totalPages} pages | ⏱️  ${formatTime(result.totalTime)} | 🚀 ${result.finalSpeed} p/s (avg: ${formatTime(Math.round(result.avgTimePerPage))}/page)`);
     console.log(`📁 ${scraper.outputDir}`);
 
   } catch (error) {
@@ -260,4 +316,10 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+// Export the class for use in other modules
+export { BinbScraper };
+
+// Only run main if this file is executed directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(console.error);
+}
