@@ -2,17 +2,17 @@ import 'dotenv/config';
 import readline from 'readline';
 import fs from 'fs/promises';
 import path from 'path';
-import CmoaScraper from './cmoa_scraper.js';
+import BookLiveScraper from './booklive_scraper.js';
 import { BinbScraper } from './binb_scraper.js';
 import { sanitizeFilename, formatTime } from './utils.js';
 
-class CmoaInteractive {
+class BookLiveInteractive {
   constructor() {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
-    this.scraper = new CmoaScraper();
+    this.scraper = new BookLiveScraper();
   }
 
   /**
@@ -29,11 +29,11 @@ class CmoaInteractive {
    */
   async getTitleId() {
     console.log('╔═════════════════════════════════════╗');
-    console.log('║  コミックシーモア ダウンローダー    ║');
+    console.log('║     BookLive ダウンローダー         ║');
     console.log('╚═════════════════════════════════════╝\n');
 
-    const titleId = await this.question('📖 タイトルID を入力してください（例: 99473）: ');
-    
+    const titleId = await this.question('📖 タイトルID を入力してください（例: 2122098）: ');
+
     if (!titleId || !/^\d+$/.test(titleId)) {
       console.log('❌ 無効なタイトルIDです');
       return null;
@@ -50,18 +50,18 @@ class CmoaInteractive {
 
     try {
       const titleInfo = await this.scraper.getTitleInfo(titleId);
-      
+
       console.log('━'.repeat(60));
       console.log(`📚 タイトル: ${titleInfo.title}`);
       console.log(`✍️  著者: ${titleInfo.author}`);
       console.log(`📗 総巻数: ${titleInfo.totalVolumes}巻`);
-      
+
       if (titleInfo.genres.length > 0) {
         console.log(`🏷️  ジャンル: ${titleInfo.genres.slice(0, 3).join(', ')}`);
       }
-      
+
       console.log('━'.repeat(60));
-      
+
       return titleInfo;
     } catch (error) {
       console.error(`❌ エラー: ${error.message}`);
@@ -74,7 +74,7 @@ class CmoaInteractive {
    */
   async selectVolume(titleInfo) {
     console.log('\n📖 利用可能な巻:');
-    
+
     // 巻のリストを表示（10巻ごとに改行）
     const volumes = titleInfo.volumes;
     for (let i = 0; i < volumes.length; i++) {
@@ -142,13 +142,13 @@ class CmoaInteractive {
    */
   async saveMetadata(titleInfo, volume, outputDir) {
     const volumeInfo = titleInfo.volumes.find(v => v.volume === volume);
-    
+
     const metadata = {
       title: titleInfo.title,
       titleId: titleInfo.titleId,
       author: titleInfo.author,
       volume: volume,
-      contentId: volumeInfo.contentId,
+      cid: volumeInfo.cid,
       readerUrl: volumeInfo.readerUrl,
       genres: titleInfo.genres,
       downloadDate: new Date().toISOString(),
@@ -158,7 +158,7 @@ class CmoaInteractive {
     const metadataPath = path.join(outputDir, 'metadata.json');
     await fs.mkdir(outputDir, { recursive: true });
     await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
-    
+
     return metadataPath;
   }
 
@@ -178,7 +178,7 @@ class CmoaInteractive {
     console.log(`🔗 ${volumeInfo.readerUrl}`);
     console.log('━'.repeat(60));
 
-    // 試し読み判定
+    // アクセス権限確認（簡易実装）
     console.log('🔍 コンテンツアクセス権限を確認中...');
     try {
       const contentInfo = await this.scraper.getContentInfo(titleInfo.titleId, volume);
@@ -189,7 +189,8 @@ class CmoaInteractive {
         return false;
       }
 
-      console.log('✅ 全ページアクセス可能');
+      console.log('✅ 全ページアクセス可能（※モック実装による仮判定）');
+      console.log('   実際のアクセス権限はダウンロード時に確認されます');
     } catch (error) {
       console.error(`⚠️  コンテンツ情報の取得に失敗: ${error.message}`);
       console.error('   ダウンロードを続行しますが、試し読みモードの可能性があります');
@@ -236,15 +237,11 @@ class CmoaInteractive {
     try {
       // 認証を初期化
       console.log('\n🔐 認証を初期化中...');
-      const email = process.env.CMOA_EMAIL;
-      const password = process.env.CMOA_PASSWORD;
+      const email = process.env.BOOKLIVE_EMAIL || '';
+      const password = process.env.BOOKLIVE_PASSWORD || '';
 
-      if (!email || !password) {
-        console.error('❌ エラー: 環境変数 CMOA_EMAIL と CMOA_PASSWORD が設定されていません');
-        console.error('   .envファイルに認証情報を設定してください');
-        this.rl.close();
-        return;
-      }
+      // モックモードでは環境変数は不要
+      console.log('ℹ️  モックモード: 環境変数は不要です');
 
       const authenticated = await this.scraper.initialize(email, password);
       if (!authenticated) {
@@ -320,7 +317,7 @@ class CmoaInteractive {
 
 // メイン実行
 async function main() {
-  const interactive = new CmoaInteractive();
+  const interactive = new BookLiveInteractive();
   await interactive.run();
 }
 

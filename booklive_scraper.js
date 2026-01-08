@@ -1,15 +1,15 @@
 import * as cheerio from 'cheerio';
 import axios from 'axios';
-import CmoaAuth from './cmoa_auth.js';
+import BookLiveAuth from './booklive_auth.js';
 
 /**
- * コミックシーモアのスクレイパークラス
+ * BookLiveのスクレイパークラス
  */
-class CmoaScraper {
-  constructor(timeout = 30000, cookieFile = 'cmoa_cookies.json') {
+class BookLiveScraper {
+  constructor(timeout = 30000, cookieFile = 'booklive_cookies.json') {
     this.timeout = timeout;
-    this.baseUrl = 'https://www.cmoa.jp';
-    this.auth = new CmoaAuth(cookieFile);
+    this.baseUrl = 'https://booklive.jp';
+    this.auth = new BookLiveAuth(cookieFile);
   }
 
   /**
@@ -25,11 +25,11 @@ class CmoaScraper {
 
   /**
    * タイトルIDから漫画の情報を取得
-   * @param {string} titleId - タイトルID（例: "99473"）
+   * @param {string} titleId - タイトルID（例: "2122098"）
    * @returns {Promise<Object>} タイトル情報
    */
   async getTitleInfo(titleId) {
-    const url = `${this.baseUrl}/title/${titleId}/`;
+    const url = `${this.baseUrl}/product/index/title_id/${titleId}`;
 
     try {
       const response = await fetch(url, {
@@ -90,6 +90,11 @@ class CmoaScraper {
       $('meta[property="og:title"]').attr('content') ||
       '不明';
 
+    // .book_titleから取得（巻数が含まれない） - ディレクトリ名用
+    let seriesTitle =
+      $('.book_title').first().text().trim() ||
+      title;  // フォールバック
+
     // 明確に不要なプレフィックスのみを削除
     title = title
       .replace(/【期間限定[^】]*】/g, '')
@@ -99,10 +104,12 @@ class CmoaScraper {
       .replace(/\s+/g, ' ')
       .trim();
 
-    // シリーズ名（ディレクトリ名用） - 巻数を削除
-    const seriesTitle = title
-      .replace(/[（(]\d+[）)]\s*$/g, '')  // 末尾の (1) や （１）
-      .replace(/\s+\d+\s*$/g, '')  // 末尾の 1 や 2
+    seriesTitle = seriesTitle
+      .replace(/【期間限定[^】]*】/g, '')
+      .replace(/【無料[^】]*】/g, '')
+      .replace(/【お試し[^】]*】/g, '')
+      .replace(/【試し読み[^】]*】/g, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     return { title, seriesTitle };
@@ -112,7 +119,7 @@ class CmoaScraper {
    * 著者名を抽出
    */
   _extractAuthor($) {
-    const authors = $('.title_details_main_box_b_box .author a')
+    const authors = $('.author a, .product_author a')
       .map((i, el) => $(el).text().trim())
       .get();
 
@@ -127,7 +134,8 @@ class CmoaScraper {
     const patterns = [
       /全(\d+)巻/,
       /(\d+)巻配信中/,
-      /(\d+)巻セット/
+      /(\d+)巻セット/,
+      /(\d+)冊/
     ];
 
     for (const pattern of patterns) {
@@ -138,12 +146,12 @@ class CmoaScraper {
     }
 
     // 巻数のリストから推測
-    const volumeLinks = $('a[href*="/title/"][href*="/vol/"]');
+    const volumeLinks = $('a[href*="/product/"][href*="/vol."]');
     let maxVol = 0;
 
     volumeLinks.each((i, el) => {
       const href = $(el).attr('href');
-      const volMatch = href.match(/\/vol\/(\d+)\//);
+      const volMatch = href.match(/\/vol\.(\d+)\//);
       if (volMatch) {
         maxVol = Math.max(maxVol, parseInt(volMatch[1]));
       }
@@ -153,7 +161,8 @@ class CmoaScraper {
       return maxVol;
     }
 
-    return 1; // デフォルト
+    // デフォルト: 単行本として扱う
+    return 1;
   }
 
   /**
@@ -176,8 +185,9 @@ class CmoaScraper {
    */
   _extractDescription($) {
     return (
+      $('.book_description').first().text().trim() ||
+      $('.product_description').first().text().trim() ||
       $('.description').first().text().trim() ||
-      $('.summary').first().text().trim() ||
       $('meta[property="og:description"]').attr('content') ||
       ''
     );
@@ -190,11 +200,11 @@ class CmoaScraper {
     const volumes = [];
 
     for (let volNum = 1; volNum <= totalVolumes; volNum++) {
-      const urlInfo = CmoaScraper.generateReaderUrl(titleId, volNum);
+      const urlInfo = BookLiveScraper.generateReaderUrl(titleId, volNum);
       volumes.push({
         volume: volNum,
         url: urlInfo.detailUrl,
-        contentId: urlInfo.contentId,
+        cid: urlInfo.cid,
         readerUrl: urlInfo.readerUrl
       });
     }
@@ -203,9 +213,9 @@ class CmoaScraper {
   }
 
   /**
-   * 認証済みでコンテンツ情報を取得
-   * @param {string} titleId - タイトルID（例: "99473"）
-   * @param {number} volume - 巻番号（例: 2）
+   * 認証済みでコンテンツ情報を取得（簡易実装）
+   * @param {string} titleId - タイトルID（例: "2122098"）
+   * @param {number} volume - 巻番号（例: 1）
    * @returns {Promise<Object>} コンテンツ情報
    */
   async getContentInfo(titleId, volume) {
@@ -213,58 +223,23 @@ class CmoaScraper {
       throw new Error('認証が必要です。先に initialize() を呼び出してください。');
     }
 
-    // cidの生成: titleID部分を6桁にパディングして、全体で10桁にする
-    const paddedTitleId = String(titleId).padStart(6, '0');
-    const cid = `0000${paddedTitleId}_jp_${String(volume).padStart(4, '0')}`;
-    const dmytime = Date.now();
-    const k = 'testKey';
+    // BookLiveの場合、cidは タイトルID_巻番号(3桁ゼロ埋め)
+    const cid = `${titleId}_${String(volume).padStart(3, '0')}`;
 
-    try {
-      const response = await axios.get(
-        `${this.baseUrl}/bib/sws/bibGetCntntInfo.php?cid=${cid}&dmytime=${dmytime}&k=${k}&u0=0&u1=0`,
-        {
-          headers: {
-            'Accept': '*/*',
-            'Cookie': this.auth.getCookieString(),
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-          },
-          timeout: this.timeout
-        }
-      );
+    // 注意: BookLiveにはcmoaのような簡易的なAPI確認エンドポイントがない可能性があるため、
+    // ここでは基本情報のみ返す簡易実装とします。
+    // 実際のアクセス権限確認は、binb_scraperでのダウンロード試行時に判明します。
 
-      const data = response.data;
-
-      if (data.result === 0) {
-        throw new Error('コンテンツ情報の取得に失敗しました（認証エラーの可能性があります）');
-      }
-
-      // 配列アクセス前のチェック
-      if (!data.items || data.items.length === 0) {
-        throw new Error('コンテンツ情報が見つかりませんでした（タイトルIDまたは巻番号が無効な可能性があります）');
-      }
-
-      const item = data.items[0];
-
-      return {
-        result: data.result,
-        shopUserId: data.ShopUserID,
-        contentId: item.ContentID,
-        title: item.Title,
-        authors: item.Authors,
-        publisher: item.Publisher,
-        viewMode: item.ViewMode, // 1: 全ページ, 2: 試し読み
-        isFullAccess: item.ViewMode === 1 && item.LastPageURL.includes('sample_flg=0'),
-        termForRead: item.TermForRead,
-        lastPageUrl: item.LastPageURL,
-        contentsServer: item.ContentsServer,
-        rawData: data
-      };
-    } catch (error) {
-      if (error.response) {
-        throw new Error(`API エラー: ${error.response.status} ${error.response.statusText}`);
-      }
-      throw new Error(`コンテンツ情報の取得に失敗しました: ${error.message}`);
-    }
+    return {
+      cid: cid,
+      titleId: titleId,
+      volume: volume,
+      readerUrl: `${this.baseUrl}/bviewer/?cid=${cid}`,
+      // モック実装として常に全ページアクセス可能とする
+      isFullAccess: true,
+      viewMode: 1, // 1: 全ページ（仮）
+      note: 'BookLive版は簡易実装のため、実際のアクセス権限はダウンロード時に判明します'
+    };
   }
 
   /**
@@ -276,32 +251,32 @@ class CmoaScraper {
 
   /**
    * 特定の巻のリーダーURLを生成
-   * @param {string} titleId - タイトルID（例: "99473"）
+   * @param {string} titleId - タイトルID（例: "2122098"）
    * @param {number} volume - 巻番号（例: 1）
    * @returns {Object} リーダーURL情報
    */
   static generateReaderUrl(titleId, volume) {
-    const baseUrl = 'https://www.cmoa.jp';
+    const baseUrl = 'https://booklive.jp';
 
-    // content_idを生成
-    const contentId = `1000${String(titleId).padStart(7, '0')}${String(volume).padStart(4, '0')}`;
+    // cidを生成: タイトルID_巻番号(3桁ゼロ埋め)
+    const cid = `${titleId}_${String(volume).padStart(3, '0')}`;
 
     // リーダーURLを生成
-    const readerUrl = `${baseUrl}/reader/browserviewer/?content_id=${contentId}`;
+    const readerUrl = `${baseUrl}/bviewer/?cid=${cid}`;
 
     // 詳細ページのURL
     const detailUrl = volume === 1
-      ? `${baseUrl}/title/${titleId}/`
-      : `${baseUrl}/title/${titleId}/vol/${volume}/`;
+      ? `${baseUrl}/product/index/title_id/${titleId}`
+      : `${baseUrl}/product/index/title_id/${titleId}/vol.${volume}`;
 
     return {
       titleId,
       volume,
-      contentId,
+      cid,
       readerUrl,
       detailUrl
     };
   }
 }
 
-export default CmoaScraper;
+export default BookLiveScraper;

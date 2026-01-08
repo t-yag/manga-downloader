@@ -35,10 +35,10 @@ export function formatTime(ms) {
 /**
  * ファイル名として使える文字列にサニタイズ
  * @param {string} filename - 元のファイル名
- * @param {number} maxLength - 最大文字数（デフォルト: 50）
+ * @param {number} maxLength - 最大文字数（デフォルト: 100）
  * @returns {string} サニタイズされたファイル名
  */
-export function sanitizeFilename(filename, maxLength = 50) {
+export function sanitizeFilename(filename, maxLength = 100) {
   return filename
     .replace(/[<>:"\/\\|?*]/g, '_')
     .replace(/\s+/g, '_')

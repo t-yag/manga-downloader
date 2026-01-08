@@ -63,7 +63,11 @@ class BinbScraper {
 
           // ログは削除（冗長なため）
         } catch (e) {
-          console.error(`  ⚠️  Failed to capture blob: ${e.message}`);
+          // preflightリクエストなどの無害なエラーは無視
+          if (!e.message.includes('preflight') &&
+              !e.message.includes('Could not load response body')) {
+            console.error(`  ⚠️  Failed to capture blob: ${e.message}`);
+          }
         }
       }
     });

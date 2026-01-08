@@ -7,7 +7,6 @@ package-lock.json
 yarn.lock
 
 # Output directories
-output/
 downloads/
 *.jpg
 *.png
