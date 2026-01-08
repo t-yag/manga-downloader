@@ -1,17 +1,31 @@
 import * as cheerio from 'cheerio';
+import axios from 'axios';
+import CmoaAuth from './cmoa_auth.js';
 
 /**
  * コミックシーモアのスクレイパークラス
  */
 class CmoaScraper {
-  constructor(timeout = 30000) {
+  constructor(timeout = 30000, cookieFile = 'cmoa_cookies.json') {
     this.timeout = timeout;
     this.baseUrl = 'https://www.cmoa.jp';
+    this.auth = new CmoaAuth(cookieFile);
+  }
+
+  /**
+   * 認証を初期化（必要な場合のみログイン）
+   * @param {string} email - メールアドレス
+   * @param {string} password - パスワード
+   * @param {boolean} forceLogin - 強制的に再ログイン
+   * @returns {Promise<boolean>} 認証成功したか
+   */
+  async initialize(email, password, forceLogin = false) {
+    return await this.auth.ensureLogin(email, password, forceLogin);
   }
 
   /**
    * タイトルIDから漫画の情報を取得
-   * @param {string} titleId - タイトルID（例: "299367"）
+   * @param {string} titleId - タイトルID（例: "99473"）
    * @returns {Promise<Object>} タイトル情報
    */
   async getTitleInfo(titleId) {
@@ -173,19 +187,91 @@ class CmoaScraper {
   }
 
   /**
+   * 認証済みでコンテンツ情報を取得
+   * @param {string} titleId - タイトルID（例: "99473"）
+   * @param {number} volume - 巻番号（例: 2）
+   * @returns {Promise<Object>} コンテンツ情報
+   */
+  async getContentInfo(titleId, volume) {
+    if (!this.auth.getCookies()) {
+      throw new Error('認証が必要です。先に initialize() を呼び出してください。');
+    }
+
+    // cidの生成: titleID部分を6桁にパディングして、全体で10桁にする
+    const paddedTitleId = String(titleId).padStart(6, '0');
+    const cid = `0000${paddedTitleId}_jp_${String(volume).padStart(4, '0')}`;
+    const dmytime = Date.now();
+    const k = 'testKey';
+
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/bib/sws/bibGetCntntInfo.php?cid=${cid}&dmytime=${dmytime}&k=${k}&u0=0&u1=0`,
+        {
+          headers: {
+            'Accept': '*/*',
+            'Cookie': this.auth.getCookieString(),
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+          },
+          timeout: this.timeout
+        }
+      );
+
+      const data = response.data;
+
+      if (data.result === 0) {
+        throw new Error('コンテンツ情報の取得に失敗しました（認証エラーの可能性があります）');
+      }
+
+      // 配列アクセス前のチェック
+      if (!data.items || data.items.length === 0) {
+        throw new Error('コンテンツ情報が見つかりませんでした（タイトルIDまたは巻番号が無効な可能性があります）');
+      }
+
+      const item = data.items[0];
+
+      return {
+        result: data.result,
+        shopUserId: data.ShopUserID,
+        contentId: item.ContentID,
+        title: item.Title,
+        authors: item.Authors,
+        publisher: item.Publisher,
+        viewMode: item.ViewMode, // 1: 全ページ, 2: 試し読み
+        isFullAccess: item.ViewMode === 1 && item.LastPageURL.includes('sample_flg=0'),
+        termForRead: item.TermForRead,
+        lastPageUrl: item.LastPageURL,
+        contentsServer: item.ContentsServer,
+        rawData: data
+      };
+    } catch (error) {
+      if (error.response) {
+        throw new Error(`API エラー: ${error.response.status} ${error.response.statusText}`);
+      }
+      throw new Error(`コンテンツ情報の取得に失敗しました: ${error.message}`);
+    }
+  }
+
+  /**
+   * ブラウザを閉じてリソースをクリーンアップ
+   */
+  async close() {
+    await this.auth.close();
+  }
+
+  /**
    * 特定の巻のリーダーURLを生成
-   * @param {string} titleId - タイトルID（例: "299367"）
+   * @param {string} titleId - タイトルID（例: "99473"）
    * @param {number} volume - 巻番号（例: 1）
    * @returns {Object} リーダーURL情報
    */
   static generateReaderUrl(titleId, volume) {
     const baseUrl = 'https://www.cmoa.jp';
-    
+
     // content_idを生成
     const contentId = `1000${String(titleId).padStart(7, '0')}${String(volume).padStart(4, '0')}`;
 
-    // リーダーURL（サンプル）を生成
-    const readerUrl = `${baseUrl}/reader/sample/?title_id=${titleId}&content_id=${contentId}`;
+    // リーダーURLを生成
+    const readerUrl = `${baseUrl}/reader/browserviewer/?content_id=${contentId}`;
 
     // 詳細ページのURL
     const detailUrl = volume === 1

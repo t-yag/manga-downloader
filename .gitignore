@@ -44,3 +44,5 @@ temp/
 
 # Metadata
 metadata.json
+.env
+cmoa_cookies.json

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import puppeteer from 'puppeteer';
 import sharp from 'sharp';
 import fs from 'fs/promises';
@@ -5,7 +6,7 @@ import path from 'path';
 import { formatTime, ProgressBar, clearLine } from './utils.js';
 
 class BinbScraper {
-  constructor(readerUrl, outputDir = './output', headless = true) {
+  constructor(readerUrl, outputDir = './output', headless = true, cookies = null) {
     this.readerUrl = readerUrl;
     this.browser = null;
     this.page = null;
@@ -13,6 +14,7 @@ class BinbScraper {
     this.currentImageIndex = 0; // 現在のインデックス
     this.outputDir = outputDir;
     this.headless = headless;
+    this.cookies = cookies; // 認証Cookie
   }
 
   async init() {
@@ -20,14 +22,27 @@ class BinbScraper {
 
     await fs.mkdir(this.outputDir, { recursive: true });
 
-    this.browser = await puppeteer.launch({
+    // ブラウザ起動オプション
+    const launchOptions = {
       headless: this.headless ? "new" : false,
       defaultViewport: { width: 1280, height: 800 },
-      executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    };
+
+    // 環境変数でChrome実行パスが指定されている場合のみ使用
+    if (process.env.CHROME_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.CHROME_EXECUTABLE_PATH;
+    }
+
+    this.browser = await puppeteer.launch(launchOptions);
 
     this.page = await this.browser.newPage();
+
+    // 認証Cookieをセット
+    if (this.cookies && this.cookies.length > 0) {
+      await this.page.setCookie(...this.cookies);
+      console.log(`✅ Authentication cookies set: ${this.cookies.length} cookies`);
+    }
 
     // HTTPレスポンスを監視してblob URLリクエストを記録
     this.page.on('response', async (response) => {
@@ -72,7 +87,7 @@ class BinbScraper {
         console.log(`  ⚠️  Timeout waiting for initial images (got ${this.imageRequests.length}/${targetImages})`);
         break;
       }
-      await this.page.waitForTimeout(50); // 50msごとにチェック
+      await new Promise(resolve => setTimeout(resolve, 50)); // 50msごとにチェック
     }
 
     const elapsed = Date.now() - startTime;
@@ -179,7 +194,7 @@ class BinbScraper {
       if (Date.now() - startTime > timeout) {
         break;
       }
-      await this.page.waitForTimeout(50); // 50msごとにチェック（より高速に）
+      await new Promise(resolve => setTimeout(resolve, 50)); // 50msごとにチェック（より高速に）
     }
 
     const newImagesCount = this.imageRequests.length - currentImageCount;
@@ -258,7 +273,7 @@ class BinbScraper {
 async function main() {
   // 引数をパース
   const args = process.argv.slice(2);
-  let readerUrl = 'https://www.cmoa.jp/reader/sample/?title_id=299367&content_id=100002993670001';
+  let readerUrl = null;
   let numPages = null;
   let outputDir = './output';
   let headless = true; // デフォルトはheadless
@@ -283,6 +298,24 @@ async function main() {
   if (positionalArgs[1]) numPages = parseInt(positionalArgs[1]);
   if (positionalArgs[2]) outputDir = positionalArgs[2];
 
+  // readerUrlが指定されていない場合はエラー
+  if (!readerUrl) {
+    console.error('❌ エラー: リーダーURLが指定されていません\n');
+    console.log('使用方法:');
+    console.log('  node binb_scraper.js <READER_URL> [NUM_PAGES] [OUTPUT_DIR] [OPTIONS]\n');
+    console.log('引数:');
+    console.log('  READER_URL   - BINBリーダーのURL（必須）');
+    console.log('  NUM_PAGES    - ダウンロードするページ数（省略時: 全ページ）');
+    console.log('  OUTPUT_DIR   - 出力ディレクトリ（省略時: ./output）\n');
+    console.log('オプション:');
+    console.log('  --show-browser, --no-headless  - ブラウザを表示する');
+    console.log('  --headless=false               - ブラウザを表示する\n');
+    console.log('例:');
+    console.log('  node binb_scraper.js "https://www.cmoa.jp/reader/browserviewer/?content_id=100000994730001"');
+    console.log('  node binb_scraper.js "https://example.com/reader" 50 ./my-output --show-browser');
+    process.exit(1);
+  }
+
   console.log('╔══════════════════════════╗');
   console.log('║   BINB Reader Scraper    ║');
   console.log('╚══════════════════════════╝\n');
@@ -303,14 +336,29 @@ async function main() {
 
     // すべてのページをダウンロード
     const result = await scraper.downloadAll(numPages);
-    
+
     console.log('✅ Completed!');
     console.log(`📄 ${result.totalPages} pages | ⏱️  ${formatTime(result.totalTime)} | 🚀 ${result.finalSpeed} p/s (avg: ${formatTime(Math.round(result.avgTimePerPage))}/page)`);
     console.log(`📁 ${scraper.outputDir}`);
 
   } catch (error) {
-    console.error('❌ Error:', error.message);
-    console.error(error.stack);
+    console.error('\n❌ エラーが発生しました:', error.message);
+
+    // Puppeteerのブラウザ起動エラーの場合、詳細なヘルプを表示
+    if (error.message.includes('Failed to launch') || error.message.includes('browser process')) {
+      console.error('\n💡 ブラウザの起動に失敗しました。以下を確認してください：');
+      console.error('   1. Puppeteerを最新版にアップデート: npm install puppeteer@latest');
+      console.error('   2. .envファイルでシステムのChromeを指定:');
+      console.error('      CHROME_EXECUTABLE_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+      console.error('   3. macOS 15 (Sequoia)の場合、Puppeteer 23以降が必要です\n');
+    }
+
+    if (process.env.DEBUG) {
+      console.error('\nスタックトレース:');
+      console.error(error.stack);
+    }
+
+    process.exit(1);
   } finally {
     await scraper.close();
   }

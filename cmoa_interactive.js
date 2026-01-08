@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import readline from 'readline';
 import fs from 'fs/promises';
 import path from 'path';
@@ -31,7 +32,7 @@ class CmoaInteractive {
     console.log('║  コミックシーモア ダウンローダー    ║');
     console.log('╚═════════════════════════════════════╝\n');
 
-    const titleId = await this.question('📖 タイトルID を入力してください（例: 299367）: ');
+    const titleId = await this.question('📖 タイトルID を入力してください（例: 99473）: ');
     
     if (!titleId || !/^\d+$/.test(titleId)) {
       console.log('❌ 無効なタイトルIDです');
@@ -166,7 +167,7 @@ class CmoaInteractive {
    */
   async downloadVolume(titleInfo, volume) {
     const volumeInfo = titleInfo.volumes.find(v => v.volume === volume);
-    
+
     if (!volumeInfo) {
       console.log(`❌ 第${volume}巻が見つかりません`);
       return false;
@@ -177,8 +178,25 @@ class CmoaInteractive {
     console.log(`🔗 ${volumeInfo.readerUrl}`);
     console.log('━'.repeat(60));
 
+    // 試し読み判定
+    console.log('🔍 コンテンツアクセス権限を確認中...');
+    try {
+      const contentInfo = await this.scraper.getContentInfo(titleInfo.titleId, volume);
+
+      if (!contentInfo.isFullAccess) {
+        console.error('❌ エラー: このコンテンツは試し読みモードです');
+        console.error('   このタイトルを購入していないか、認証に問題がある可能性があります');
+        return false;
+      }
+
+      console.log('✅ 全ページアクセス可能');
+    } catch (error) {
+      console.error(`⚠️  コンテンツ情報の取得に失敗: ${error.message}`);
+      console.error('   ダウンロードを続行しますが、試し読みモードの可能性があります');
+    }
+
     const outputDir = await this.getOutputDirectory(titleInfo, volume);
-    
+
     // メタデータを保存
     try {
       const metadataPath = await this.saveMetadata(titleInfo, volume, outputDir);
@@ -187,8 +205,9 @@ class CmoaInteractive {
       console.error(`⚠️  メタデータの保存に失敗: ${error.message}`);
     }
 
-    // BinbScraperを使用してダウンロード
-    const binbScraper = new BinbScraper(volumeInfo.readerUrl, outputDir, true);
+    // BinbScraperを使用してダウンロード（認証Cookieを渡す）
+    const cookies = this.scraper.auth.getCookies();
+    const binbScraper = new BinbScraper(volumeInfo.readerUrl, outputDir, true, cookies);
 
     try {
       await binbScraper.init();
@@ -215,6 +234,26 @@ class CmoaInteractive {
    */
   async run() {
     try {
+      // 認証を初期化
+      console.log('\n🔐 認証を初期化中...');
+      const email = process.env.CMOA_EMAIL;
+      const password = process.env.CMOA_PASSWORD;
+
+      if (!email || !password) {
+        console.error('❌ エラー: 環境変数 CMOA_EMAIL と CMOA_PASSWORD が設定されていません');
+        console.error('   .envファイルに認証情報を設定してください');
+        this.rl.close();
+        return;
+      }
+
+      const authenticated = await this.scraper.initialize(email, password);
+      if (!authenticated) {
+        console.error('❌ 認証に失敗しました');
+        this.rl.close();
+        return;
+      }
+      console.log('✅ 認証成功\n');
+
       // タイトルIDを取得
       const titleId = await this.getTitleId();
       if (!titleId) {
@@ -229,41 +268,52 @@ class CmoaInteractive {
         return;
       }
 
-      // 巻を選択
-      const selectedVolumes = await this.selectVolume(titleInfo);
-      
-      if (selectedVolumes.length === 0) {
-        console.log('❌ 有効な巻が選択されていません');
-        this.rl.close();
-        return;
+      // 巻を選択（有効な選択があるまでループ）
+      let selectedVolumes = [];
+      while (selectedVolumes.length === 0) {
+        selectedVolumes = await this.selectVolume(titleInfo);
+
+        if (selectedVolumes.length === 0) {
+          console.log('❌ 有効な巻が選択されていません。もう一度入力してください。\n');
+        }
       }
 
       console.log(`\n📦 選択された巻: ${selectedVolumes.join(', ')}`);
-      
-      const confirm = await this.question(`\n⚠️  ${selectedVolumes.length}巻をダウンロードしますか? (Y/n): `);
-      
-      if (confirm.toLowerCase() === 'n' || confirm.toLowerCase() === 'no') {
-        console.log('❌ キャンセルしました');
-        this.rl.close();
-        return;
-      }
+      console.log('📥 ダウンロードを開始します...\n');
 
       // 各巻をダウンロード
+      const results = [];
       for (const volume of selectedVolumes) {
-        await this.downloadVolume(titleInfo, volume);
+        const success = await this.downloadVolume(titleInfo, volume);
+        results.push({ volume, success });
       }
 
-      console.log('🎉 すべてのダウンロードが完了しました！');
+      // 結果サマリー
+      const successCount = results.filter(r => r.success).length;
+      const failedVolumes = results.filter(r => !r.success).map(r => r.volume);
+
+      console.log('\n' + '═'.repeat(60));
+      if (successCount === selectedVolumes.length) {
+        console.log('🎉 すべてのダウンロードが完了しました！');
+      } else if (successCount > 0) {
+        console.log(`⚠️  一部のダウンロードが完了しました（${successCount}/${selectedVolumes.length}巻）`);
+        console.log(`❌ 失敗した巻: ${failedVolumes.join(', ')}`);
+      } else {
+        console.log('❌ すべてのダウンロードが失敗しました');
+      }
+      console.log('═'.repeat(60));
 
     } catch (error) {
       console.error('❌ エラーが発生しました:', error.message);
       console.error(error.stack);
     } finally {
+      await this.scraper.close();
       this.rl.close();
     }
   }
 
-  close() {
+  async close() {
+    await this.scraper.close();
     this.rl.close();
   }
 }
