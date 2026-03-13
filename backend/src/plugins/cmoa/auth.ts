@@ -1,0 +1,261 @@
+import puppeteer, { Browser, Page } from "puppeteer";
+import axios from "axios";
+import fs from "fs/promises";
+import { logger } from "../../logger.js";
+import type {
+  AuthProvider,
+  CredentialField,
+  SessionData,
+  CookieData,
+} from "../base.js";
+
+const log = logger.child({ module: "CmoaAuth" });
+
+/**
+ * Cmoa authentication provider
+ * Handles Puppeteer-based login, cookie persistence, and session validation
+ */
+export class CmoaAuth implements AuthProvider {
+  private browser: Browser | null = null;
+  private session: SessionData | null = null;
+
+  getCredentialFields(): CredentialField[] {
+    return [
+      {
+        key: "email",
+        label: "Email",
+        type: "email",
+        required: true,
+      },
+      {
+        key: "password",
+        label: "Password",
+        type: "password",
+        required: true,
+      },
+    ];
+  }
+
+  async login(credentials: Record<string, string>): Promise<boolean> {
+    const { email, password } = credentials;
+
+    if (!email || !password) {
+      throw new Error("Email and password are required");
+    }
+
+    log.info("Logging in with browser...");
+
+    const launchOptions: any = {
+      headless: false, // OpenID flow requires visible browser
+      defaultViewport: { width: 1280, height: 800 },
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    };
+
+    if (process.env.CHROME_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.CHROME_EXECUTABLE_PATH;
+    }
+
+    this.browser = await puppeteer.launch(launchOptions);
+    const page = await this.browser.newPage();
+    page.setDefaultTimeout(60000);
+    page.setDefaultNavigationTimeout(60000);
+
+    try {
+      // Navigate to login page
+      await page.goto("https://www.cmoa.jp/auth/login/", {
+        waitUntil: "networkidle2",
+        timeout: 60000,
+      });
+
+      // Wait for input fields
+      await page.waitForSelector('input[name="email"]', { timeout: 30000 });
+
+      // Enter credentials
+      await page.type('input[name="email"]', email, { delay: 100 });
+      await page.type('input[name="password"]', password, { delay: 100 });
+
+      // Click login button
+      const submitButton = await page.$("#submitButton");
+      if (!submitButton) {
+        throw new Error("Login button not found");
+      }
+
+      await submitButton.click();
+
+      try {
+        await page.waitForNavigation({
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+      } catch (navError) {
+        // Navigation timeout can be ignored
+      }
+
+      // Wait for OpenID redirect (max 15 seconds)
+      const maxWaitTime = 15000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWaitTime) {
+        const currentUrl = page.url();
+
+        // Success: redirected to www.cmoa.jp
+        if (
+          currentUrl.includes("www.cmoa.jp") &&
+          !currentUrl.includes("/auth/login")
+        ) {
+          break;
+        }
+
+        // Failure: stuck on OpenID provider page
+        if (currentUrl.includes("member.cmoa.jp/openid/provider")) {
+          throw new Error("Login error: stuck on OpenID provider page");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      // Get cookies
+      const cookies = await page.cookies();
+      const finalUrl = page.url();
+
+      // Verify login success
+      if (!finalUrl.includes("www.cmoa.jp") || finalUrl.includes("/auth/login")) {
+        throw new Error("Login failed: not redirected to correct page");
+      }
+
+      // Convert Puppeteer cookies to SessionData format
+      this.session = {
+        cookies: cookies.map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          expires: c.expires,
+        })),
+      };
+
+      log.info(`Login successful (${cookies.length} cookies)`);
+
+      return true;
+    } catch (error: any) {
+      log.error(`Login failed: ${error.message}`);
+      return false;
+    } finally {
+      if (page) {
+        try {
+          await page.close();
+        } catch (e) {
+          // Ignore page close errors
+        }
+      }
+      if (this.browser) {
+        await this.browser.close();
+        this.browser = null;
+      }
+    }
+  }
+
+  async validateSession(): Promise<boolean> {
+    if (!this.session || !this.session.cookies || this.session.cookies.length === 0) {
+      log.info("No session to validate");
+      return false;
+    }
+
+    log.info("Validating session...");
+
+    try {
+      const cookieString = this.session.cookies
+        .map((c) => `${c.name}=${c.value}`)
+        .join("; ");
+
+      // Test with a sample content
+      const titleId = process.env.TEST_TITLE_ID || "99473";
+      const volume = parseInt(process.env.TEST_VOLUME || "1", 10);
+      const paddedTitleId = String(titleId).padStart(6, "0");
+      const cid = `0000${paddedTitleId}_jp_${String(volume).padStart(4, "0")}`;
+      const dmytime = Date.now();
+      const k = "testKey";
+
+      const response = await axios.get(
+        `https://www.cmoa.jp/bib/sws/bibGetCntntInfo.php?cid=${cid}&dmytime=${dmytime}&k=${k}&u0=0&u1=0`,
+        {
+          headers: {
+            Accept: "*/*",
+            Cookie: cookieString,
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          },
+          timeout: 10000,
+        }
+      );
+
+      const data = response.data;
+
+      if (Number(data.result) === 0) {
+        log.warn("Session validation failed: API returned result=0");
+        return false;
+      }
+
+      if (!data.items || data.items.length === 0) {
+        log.warn("Session validation failed: no content items returned");
+        return false;
+      }
+
+      const item = data.items[0];
+      const isFullAccess =
+        Number(item.ViewMode) === 1 &&
+        (!item.LastPageURL || item.LastPageURL.includes("sample_flg=0"));
+
+      if (isFullAccess) {
+        log.info("Session valid");
+        return true;
+      } else {
+        log.warn("Session invalid: trial mode only");
+        return false;
+      }
+    } catch (error: any) {
+      log.warn(`Session validation failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  getSession(): SessionData | null {
+    return this.session;
+  }
+
+  async loadSession(cookiePath: string): Promise<boolean> {
+    try {
+      const data = await fs.readFile(cookiePath, "utf-8");
+      const cookies = JSON.parse(data);
+      this.session = { cookies };
+      log.info(`Session loaded: ${cookies.length} cookies`);
+      return true;
+    } catch (error: any) {
+      if (error.code === "ENOENT") {
+        log.info("No saved session found");
+      } else {
+        log.error(`Failed to load session: ${error.message}`);
+      }
+      return false;
+    }
+  }
+
+  async saveSession(cookiePath: string): Promise<void> {
+    if (!this.session || !this.session.cookies || this.session.cookies.length === 0) {
+      log.warn("No session to save");
+      return;
+    }
+
+    try {
+      await fs.writeFile(
+        cookiePath,
+        JSON.stringify(this.session.cookies, null, 2),
+        "utf-8"
+      );
+      log.info(`Session saved: ${cookiePath}`);
+    } catch (error: any) {
+      log.error(`Failed to save session: ${error.message}`);
+      throw error;
+    }
+  }
+}

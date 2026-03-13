@@ -1,47 +1,20 @@
 # Node.js
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-
-# Output directories
-downloads/
-*.jpg
-*.png
-*.jpeg
 
 # Environment variables
 .env
 .env.local
-.env.*.local
+.env.*
 
 # Logs
-logs/
 *.log
 
 # OS files
 .DS_Store
-Thumbs.db
-desktop.ini
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# serene
+# Serena
 .serena/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Metadata
-metadata.json
-.env
-cmoa_cookies.json
