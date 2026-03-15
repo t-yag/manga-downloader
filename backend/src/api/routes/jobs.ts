@@ -5,7 +5,7 @@ import { jobQueue } from "../../queue/queue.js";
 import { registry } from "../../plugins/registry.js";
 
 export async function jobRoutes(app: FastifyInstance): Promise<void> {
-  // List jobs
+  // List jobs (enriched with title/volume info)
   app.get("/api/jobs", async (request, reply) => {
     const { status, pluginId, limit = 50, offset = 0 } = request.query as Record<string, string>;
 
@@ -24,7 +24,34 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       return true;
     });
 
-    return filtered;
+    // Enrich with title/volume info
+    return filtered.map((j) => {
+      let titleName: string | null = null;
+      let volumeNum: number | null = null;
+      let libraryId: number | null = null;
+
+      if (j.volumeId) {
+        const vol = db
+          .select()
+          .from(schema.volumes)
+          .where(eq(schema.volumes.id, j.volumeId))
+          .get();
+        if (vol) {
+          volumeNum = vol.volumeNum;
+          libraryId = vol.libraryId;
+          if (vol.libraryId) {
+            const lib = db
+              .select({ title: schema.library.title })
+              .from(schema.library)
+              .where(eq(schema.library.id, vol.libraryId))
+              .get();
+            if (lib) titleName = lib.title;
+          }
+        }
+      }
+
+      return { ...j, titleName, volumeNum, libraryId };
+    });
   });
 
   // Get job detail
@@ -74,7 +101,6 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
             titleId,
             title: titleInfo.title,
             author: titleInfo.author,
-            description: titleInfo.description,
             genres: JSON.stringify(titleInfo.genres),
             totalVolumes: titleInfo.totalVolumes,
             coverUrl: titleInfo.coverUrl,
@@ -89,6 +115,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
             .values({
               libraryId: result.id,
               volumeNum: vol.volume,
+              thumbnailUrl: vol.thumbnailUrl,
               metadata: JSON.stringify({
                 readerUrl: vol.readerUrl,
                 contentKey: vol.contentKey,

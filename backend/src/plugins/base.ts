@@ -95,7 +95,6 @@ export interface TitleInfo {
   title: string;
   seriesTitle: string;
   author: string;
-  description: string;
   genres: string[];
   totalVolumes: number;
   coverUrl?: string;
@@ -108,6 +107,7 @@ export interface VolumeInfo {
   /** Plugin-specific identifier (contentId, cid, etc.) */
   contentKey: string;
   detailUrl?: string;
+  thumbnailUrl?: string;
 }
 
 export interface MetadataProvider {

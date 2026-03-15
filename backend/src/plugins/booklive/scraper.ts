@@ -34,8 +34,6 @@ export class BookLiveScraper implements MetadataProvider {
       const author = this.extractAuthor($);
       const totalVolumes = this.extractTotalVolumes($, html);
       const genres = this.extractGenres($);
-      const description = this.extractDescription($);
-
       // Generate volume information
       const volumes = this.generateVolumeInfos(titleId, totalVolumes);
 
@@ -44,7 +42,6 @@ export class BookLiveScraper implements MetadataProvider {
         title,
         seriesTitle,
         author,
-        description,
         genres,
         totalVolumes,
         volumes,
@@ -145,16 +142,6 @@ export class BookLiveScraper implements MetadataProvider {
     });
 
     return genres;
-  }
-
-  private extractDescription($: cheerio.CheerioAPI): string {
-    return (
-      $(".book_description").first().text().trim() ||
-      $(".product_description").first().text().trim() ||
-      $(".description").first().text().trim() ||
-      $('meta[property="og:description"]').attr("content") ||
-      ""
-    );
   }
 
   private generateVolumeInfos(titleId: string, totalVolumes: number): VolumeInfo[] {

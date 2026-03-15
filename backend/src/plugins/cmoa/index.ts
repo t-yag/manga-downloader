@@ -108,8 +108,8 @@ class CmoaAvailabilityChecker implements AvailabilityChecker {
     attempt = 0,
   ): Promise<VolumeAvailability> {
     try {
-      const paddedTitleId = String(titleId).padStart(6, "0");
-      const cid = `0000${paddedTitleId}_jp_${String(vol).padStart(4, "0")}`;
+      const paddedTitleId = String(titleId).padStart(10, "0");
+      const cid = `${paddedTitleId}_jp_${String(vol).padStart(4, "0")}`;
       const dmytime = Date.now();
 
       const response = await axios.get(

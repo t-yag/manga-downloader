@@ -40,9 +40,6 @@ export class CmoaScraper implements MetadataProvider {
       // Extract genres
       const genres = this.extractGenres($);
 
-      // Extract description
-      const description = this.extractDescription($);
-
       // Generate volume URLs
       const volumes = this.generateVolumeUrls(titleId, totalVolumes);
 
@@ -54,7 +51,6 @@ export class CmoaScraper implements MetadataProvider {
         title,
         seriesTitle,
         author,
-        description,
         genres,
         totalVolumes,
         coverUrl,
@@ -76,7 +72,8 @@ export class CmoaScraper implements MetadataProvider {
   }
 
   /**
-   * Extract title and series title from page
+   * Extract title and series title from page.
+   * Uses JSON-LD BreadCrumb for reliable series title extraction.
    */
   private extractTitle($: cheerio.CheerioAPI): {
     title: string;
@@ -97,20 +94,32 @@ export class CmoaScraper implements MetadataProvider {
       .replace(/\s+/g, " ")
       .trim();
 
-    // Series title (for directory naming) - remove volume numbers
-    const seriesTitle = title
-      .replace(/[（(]\d+[）)]\s*$/g, "") // trailing (1) or （1）
-      .replace(/\s+\d+\s*$/g, "") // trailing 1 or 2
-      .trim();
+    // Extract series title from JSON-LD BreadCrumb (second-to-last item)
+    let seriesTitle = "";
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (seriesTitle) return;
+      try {
+        const data = JSON.parse($(el).text());
+        const list = Array.isArray(data) ? data : [data];
+        for (const item of list) {
+          if (item?.["@type"] === "BreadCrumbList" && item.itemListElement) {
+            const items = item.itemListElement;
+            if (items.length >= 2) {
+              seriesTitle = items[items.length - 2].name?.trim() || "";
+            }
+          }
+        }
+      } catch {}
+    });
 
-    return { title, seriesTitle };
+    return { title, seriesTitle: seriesTitle || title };
   }
 
   /**
    * Extract author name
    */
   private extractAuthor($: cheerio.CheerioAPI): string {
-    const authors = $(".title_details_main_box_b_box .author a")
+    const authors = $(".title_details_author_name a")
       .map((i, el) => $(el).text().trim())
       .get();
 
@@ -167,18 +176,6 @@ export class CmoaScraper implements MetadataProvider {
   }
 
   /**
-   * Extract description
-   */
-  private extractDescription($: cheerio.CheerioAPI): string {
-    return (
-      $(".description").first().text().trim() ||
-      $(".summary").first().text().trim() ||
-      $('meta[property="og:description"]').attr("content") ||
-      ""
-    );
-  }
-
-  /**
    * Extract cover image URL
    */
   private extractCoverUrl($: cheerio.CheerioAPI): string | undefined {
@@ -208,10 +205,21 @@ export class CmoaScraper implements MetadataProvider {
         readerUrl: urlInfo.readerUrl,
         contentKey: urlInfo.contentId,
         detailUrl: urlInfo.detailUrl,
+        thumbnailUrl: CmoaScraper.generateThumbnailUrl(titleId, volNum),
       });
     }
 
     return volumes;
+  }
+
+  /**
+   * Generate thumbnail URL for a specific volume.
+   * Pattern: https://cmoa.akamaized.net/data/image/title/title_{titleId(10)}/VOLUME/{contentId}.jpg
+   */
+  static generateThumbnailUrl(titleId: string, volume: number): string {
+    const paddedTitle = String(titleId).padStart(10, "0");
+    const contentId = `1${paddedTitle}${String(volume).padStart(4, "0")}`;
+    return `https://cmoa.akamaized.net/data/image/title/title_${paddedTitle}/VOLUME/${contentId}.jpg`;
   }
 
   /**
@@ -233,9 +241,8 @@ export class CmoaScraper implements MetadataProvider {
     const baseUrl = "https://www.cmoa.jp";
 
     // Generate content_id
-    const contentId = `1000${String(titleId).padStart(7, "0")}${String(
-      volume
-    ).padStart(4, "0")}`;
+    const paddedTitle = String(titleId).padStart(10, "0");
+    const contentId = `1${paddedTitle}${String(volume).padStart(4, "0")}`;
 
     // Generate reader URL
     const readerUrl = `${baseUrl}/reader/browserviewer/?content_id=${contentId}`;

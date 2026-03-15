@@ -20,7 +20,6 @@ export const library = sqliteTable(
     titleId: text("title_id").notNull(),
     title: text("title").notNull(),
     author: text("author"),
-    description: text("description"),
     genres: text("genres"), // JSON array
     totalVolumes: integer("total_volumes"),
     coverUrl: text("cover_url"),
@@ -47,6 +46,7 @@ export const volumes = sqliteTable(
     pageCount: integer("page_count"),
     filePath: text("file_path"),
     fileSize: integer("file_size"),
+    thumbnailUrl: text("thumbnail_url"),
     downloadedAt: text("downloaded_at"),
     checkedAt: text("checked_at"), // last availability check
     metadata: text("metadata"), // JSON

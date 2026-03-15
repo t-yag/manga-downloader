@@ -1,5 +1,9 @@
-import { Tabs } from "expo-router";
+import { Stack, useRouter, usePathname } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Toaster } from "sonner-native";
+import { Platform, View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 const queryClient = new QueryClient({
@@ -8,50 +12,128 @@ const queryClient = new QueryClient({
   },
 });
 
-export default function Layout() {
+const SIDEBAR_WIDTH = 180;
+
+const SIDEBAR_ITEMS: { href: string; matchPrefix: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { href: "/", matchPrefix: "/", title: "ライブラリ", icon: "library" },
+  { href: "/jobs", matchPrefix: "/jobs", title: "ジョブ", icon: "download" },
+  { href: "/settings", matchPrefix: "/settings", title: "設定", icon: "settings" },
+];
+
+function WebSidebar() {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const isActive = (item: (typeof SIDEBAR_ITEMS)[number]) => {
+    if (item.href === "/") {
+      return pathname === "/" || pathname.startsWith("/library");
+    }
+    return pathname.startsWith(item.matchPrefix);
+  };
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <Tabs
-        screenOptions={{
-          tabBarActiveTintColor: "#2563eb",
-          headerShown: false,
-        }}
-      >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: "ライブラリ",
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="library" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="jobs/index"
-          options={{
-            title: "ジョブ",
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="download" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="settings"
-          options={{
-            title: "設定",
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="settings" size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="library/[id]"
-          options={{
-            href: null,
-            tabBarItemStyle: { display: "none" },
-          }}
-        />
-      </Tabs>
-    </QueryClientProvider>
+    <View style={sidebarStyles.sidebar}>
+      {SIDEBAR_ITEMS.map((item) => {
+        const focused = isActive(item);
+        const color = focused ? "#60a5fa" : "#64748b";
+
+        return (
+          <TouchableOpacity
+            key={item.href}
+            style={[sidebarStyles.item, focused && sidebarStyles.itemActive]}
+            onPress={() => router.navigate(item.href as any)}
+          >
+            <Ionicons name={item.icon} size={20} color={color} />
+            <Text style={[sidebarStyles.label, { color }]}>{item.title}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+const sidebarStyles = StyleSheet.create({
+  sidebar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: "#0f172a",
+    borderRightColor: "#1e293b",
+    borderRightWidth: 1,
+    paddingTop: 32,
+    paddingHorizontal: 8,
+    gap: 4,
+    zIndex: 1,
+  },
+  item: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  itemActive: {
+    backgroundColor: "#1e293b",
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});
+
+const isWeb = Platform.OS === "web";
+
+export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          {isWeb && <WebSidebar />}
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: "#0f172a" },
+              headerTintColor: "#f1f5f9",
+              headerTitleStyle: { fontWeight: "700", fontSize: 17 },
+              headerShadowVisible: false,
+              contentStyle: {
+                backgroundColor: "#0f172a",
+                ...(isWeb && { marginLeft: SIDEBAR_WIDTH, paddingHorizontal: 16, paddingTop: 16 }),
+              },
+            }}
+          >
+            <Stack.Screen
+              name="(tabs)"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="library/[id]"
+              options={{
+                title: "タイトル詳細",
+                headerBackTitle: "戻る",
+                ...(isWeb && { headerShown: false }),
+              }}
+            />
+          </Stack>
+          <Toaster
+            theme="dark"
+            position="top-center"
+            offset={isWeb ? SIDEBAR_WIDTH / 2 : 0}
+            toastOptions={{
+              style: {
+                backgroundColor: "#1e293b",
+                borderColor: "#334155",
+                borderWidth: 1,
+                ...(isWeb && { marginLeft: SIDEBAR_WIDTH }),
+              },
+              titleStyle: { color: "#f1f5f9" },
+              descriptionStyle: { color: "#94a3b8" },
+            }}
+          />
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

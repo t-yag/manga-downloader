@@ -21,6 +21,7 @@ export async function createApp() {
 
   await app.register(cors, {
     origin: true, // Allow all origins (single-user app behind VPN)
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
   });
 
   // Register routes

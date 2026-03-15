@@ -35,7 +35,6 @@ export function initDatabase(): void {
       title_id TEXT NOT NULL,
       title TEXT NOT NULL,
       author TEXT,
-      description TEXT,
       genres TEXT,
       total_volumes INTEGER,
       cover_url TEXT,
@@ -56,6 +55,7 @@ export function initDatabase(): void {
       page_count INTEGER,
       file_path TEXT,
       file_size INTEGER,
+      thumbnail_url TEXT,
       downloaded_at TEXT,
       checked_at TEXT,
       metadata TEXT
@@ -85,6 +85,16 @@ export function initDatabase(): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  // Migrations: add columns if they don't exist yet
+  const volColumns = sqlite
+    .prepare("PRAGMA table_info(volumes)")
+    .all() as { name: string }[];
+  const volColumnNames = new Set(volColumns.map((c) => c.name));
+
+  if (!volColumnNames.has("thumbnail_url")) {
+    sqlite.exec("ALTER TABLE volumes ADD COLUMN thumbnail_url TEXT");
+  }
 
   sqlite.close();
   logger.info("Database initialized");

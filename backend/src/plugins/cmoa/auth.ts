@@ -163,60 +163,24 @@ export class CmoaAuth implements AuthProvider {
 
     log.info("Validating session...");
 
-    try {
-      const cookieString = this.session.cookies
-        .map((c) => `${c.name}=${c.value}`)
-        .join("; ");
+    // Check cookie expiry only (no API call to avoid rate limiting)
+    const now = Date.now() / 1000;
+    const authCookie = this.session.cookies.find(
+      (c) => c.name === "_ssid_" || c.name === "_cmoa_login_session_token_"
+    );
 
-      // Test with a sample content
-      const titleId = process.env.TEST_TITLE_ID || "99473";
-      const volume = parseInt(process.env.TEST_VOLUME || "1", 10);
-      const paddedTitleId = String(titleId).padStart(6, "0");
-      const cid = `0000${paddedTitleId}_jp_${String(volume).padStart(4, "0")}`;
-      const dmytime = Date.now();
-      const k = "testKey";
-
-      const response = await axios.get(
-        `https://www.cmoa.jp/bib/sws/bibGetCntntInfo.php?cid=${cid}&dmytime=${dmytime}&k=${k}&u0=0&u1=0`,
-        {
-          headers: {
-            Accept: "*/*",
-            Cookie: cookieString,
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          },
-          timeout: 10000,
-        }
-      );
-
-      const data = response.data;
-
-      if (Number(data.result) === 0) {
-        log.warn("Session validation failed: API returned result=0");
-        return false;
-      }
-
-      if (!data.items || data.items.length === 0) {
-        log.warn("Session validation failed: no content items returned");
-        return false;
-      }
-
-      const item = data.items[0];
-      const isFullAccess =
-        Number(item.ViewMode) === 1 &&
-        (!item.LastPageURL || item.LastPageURL.includes("sample_flg=0"));
-
-      if (isFullAccess) {
-        log.info("Session valid");
-        return true;
-      } else {
-        log.warn("Session invalid: trial mode only");
-        return false;
-      }
-    } catch (error: any) {
-      log.warn(`Session validation failed: ${error.message}`);
+    if (!authCookie) {
+      log.warn("Session invalid: auth cookie not found");
       return false;
     }
+
+    if (authCookie.expires && authCookie.expires > 0 && authCookie.expires < now) {
+      log.warn("Session invalid: auth cookie expired");
+      return false;
+    }
+
+    log.info("Session valid");
+    return true;
   }
 
   getSession(): SessionData | null {

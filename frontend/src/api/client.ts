@@ -42,7 +42,6 @@ export interface TitleInfo {
   title: string;
   seriesTitle: string;
   author: string;
-  description: string;
   genres: string[];
   totalVolumes: number;
   coverUrl?: string;
@@ -83,13 +82,13 @@ export interface Volume {
   availabilityReason: string | null;
   pageCount: number | null;
   filePath: string | null;
+  thumbnailUrl: string | null;
   downloadedAt: string | null;
   checkedAt: string | null;
   metadata: Record<string, unknown> | null;
 }
 
 export interface LibraryDetail extends Omit<LibraryTitle, "volumeSummary"> {
-  description: string | null;
   volumes: Volume[];
 }
 
@@ -108,8 +107,22 @@ export function addToLibrary(params: { url?: string; pluginId?: string; titleId?
   });
 }
 
+export function updateLibraryTitle(id: number, params: { title?: string; author?: string }) {
+  return request<{ message: string }>(`/api/library/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(params),
+  });
+}
+
 export function deleteFromLibrary(id: number) {
   return request<{ message: string }>(`/api/library/${id}`, { method: "DELETE" });
+}
+
+export function deleteVolumes(id: number, volumes: number[]) {
+  return request<{ message: string; deletedCount: number; errors: string[] }>(
+    `/api/library/${id}/delete-volumes`,
+    { method: "POST", body: JSON.stringify({ volumes }) }
+  );
 }
 
 export function refreshTitle(id: number) {
@@ -123,6 +136,13 @@ export function checkAvailability(id: number, accountId?: number) {
   return request<{ message: string; results: { volume: number; available: boolean; reason: string }[] }>(
     `/api/library/${id}/check-availability`,
     { method: "POST", body: JSON.stringify({ accountId }) }
+  );
+}
+
+export function syncTitle(id: number, accountId?: number, volumes?: number[]) {
+  return request<{ message: string; newVolumes: number; totalVolumes: number | null; checkedVolumes: number; availableCount: number }>(
+    `/api/library/${id}/sync`,
+    { method: "POST", body: JSON.stringify({ accountId, volumes }) }
   );
 }
 
@@ -148,11 +168,18 @@ export interface Job {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string | null;
+  titleName: string | null;
+  volumeNum: number | null;
+  libraryId: number | null;
 }
 
-export function getJobs(params?: { status?: string }) {
-  const query = params?.status ? `?status=${params.status}` : "";
-  return request<Job[]>(`/api/jobs${query}`);
+export function getJobs(params?: { status?: string; limit?: number; offset?: number }) {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.offset != null) q.set("offset", String(params.offset));
+  const qs = q.toString();
+  return request<Job[]>(`/api/jobs${qs ? `?${qs}` : ""}`);
 }
 
 export function cancelJob(id: number) {
@@ -189,6 +216,13 @@ export function getAccounts() {
 export function createAccount(params: { pluginId: string; label?: string; credentials: Record<string, string> }) {
   return request<Account>("/api/accounts", {
     method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export function updateAccount(id: number, params: { label?: string; credentials?: Record<string, string> }) {
+  return request<{ message: string }>(`/api/accounts/${id}`, {
+    method: "PUT",
     body: JSON.stringify(params),
   });
 }
