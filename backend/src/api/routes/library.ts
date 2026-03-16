@@ -532,12 +532,22 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           reason = result.reason;
         }
 
+        const updates: Record<string, unknown> = {
+          status: newStatus,
+          availabilityReason: reason,
+          checkedAt: now,
+        };
+
+        // Override readerUrl/contentKey if provided (e.g. free volumes with different cid)
+        if (result.overrideReaderUrl || result.overrideContentKey) {
+          const existingMeta = vol.metadata ? JSON.parse(vol.metadata) : {};
+          if (result.overrideReaderUrl) existingMeta.readerUrl = result.overrideReaderUrl;
+          if (result.overrideContentKey) existingMeta.contentKey = result.overrideContentKey;
+          updates.metadata = JSON.stringify(existingMeta);
+        }
+
         db.update(schema.volumes)
-          .set({
-            status: newStatus,
-            availabilityReason: reason,
-            checkedAt: now,
-          })
+          .set(updates)
           .where(eq(schema.volumes.id, vol.id))
           .run();
       }
@@ -602,7 +612,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Helper: check availability for given volumes and update DB
-    async function checkAndUpdate(vols: { id: number; volumeNum: number; unit: string | null; status: string | null; freeUntil: string | null }[]) {
+    async function checkAndUpdate(vols: { id: number; volumeNum: number; unit: string | null; status: string | null; freeUntil: string | null; metadata: string | null }[]) {
       if (vols.length === 0 || !plugin?.availabilityChecker) return [];
       const session = await resolveSession();
       const results = await plugin.availabilityChecker.checkAvailability(
@@ -636,6 +646,15 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         if (vol.status !== "done") {
           update.status = newStatus;
         }
+
+        // Override readerUrl/contentKey if provided (e.g. free volumes with different cid)
+        if (result.overrideReaderUrl || result.overrideContentKey) {
+          const existingMeta = vol.metadata ? JSON.parse(vol.metadata) : {};
+          if (result.overrideReaderUrl) existingMeta.readerUrl = result.overrideReaderUrl;
+          if (result.overrideContentKey) existingMeta.contentKey = result.overrideContentKey;
+          update.metadata = JSON.stringify(existingMeta);
+        }
+
         db.update(schema.volumes)
           .set(update)
           .where(eq(schema.volumes.id, vol.id))

@@ -13,7 +13,7 @@ import {
   Linking,
   TextInput,
 } from "react-native";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect, useIsFocused } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -139,6 +139,7 @@ function formatDate(dateStr: string) {
 export default function TitleDetailScreen() {
   const { id, autoSync } = useLocalSearchParams<{ id: string; autoSync?: string }>();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -164,6 +165,7 @@ export default function TitleDetailScreen() {
     queryKey: ["library", id],
     queryFn: () => getLibraryTitle(Number(id)),
     refetchInterval: (query) => {
+      if (!isFocused) return false;
       const vols = query.state.data?.volumes;
       if (!vols) return false;
       const hasActive = vols.some(
@@ -430,14 +432,6 @@ export default function TitleDetailScreen() {
                 >
                   <Ionicons name="open-outline" size={13} color="#60a5fa" />
                 </TouchableOpacity>
-                {isStandalone && saVol && (
-                  <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg }]}>
-                    <Ionicons name={saCfg.icon} size={10} color={saCfg.fg} />
-                    <Text style={[styles.listStatusText, { color: saCfg.fg }]}>
-                      {saCfg.label}
-                    </Text>
-                  </View>
-                )}
               </View>
 
               <View style={styles.titleActions}>
@@ -488,13 +482,13 @@ export default function TitleDetailScreen() {
         {isStandalone && saVol && (
           <>
 
-            {(saIsActive || saVol.status === "done" || saVol.status === "downloading") && (
             <View style={styles.saStatusCard}>
-              {saIsActive && (
-                <View style={styles.saStatusRow}>
-                  <ActivityIndicator color="#fb923c" size="small" />
-                </View>
-              )}
+              <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg, alignSelf: "flex-start" }]}>
+                <Ionicons name={saCfg.icon} size={10} color={saCfg.fg} />
+                <Text style={[styles.listStatusText, { color: saCfg.fg }]}>
+                  {saCfg.label}
+                </Text>
+              </View>
 
               {saVol.status === "downloading" && saVol.jobProgress != null && saVol.jobProgress > 0 && (
                 <View style={styles.volProgressRow}>
@@ -527,7 +521,6 @@ export default function TitleDetailScreen() {
                 <Text style={styles.saMetaItem}>{saVol.pageCount}ページ</Text>
               )}
             </View>
-            )}
 
             <View style={styles.saActions}>
               {(saVol.status === "available" || saVol.status === "done") && (

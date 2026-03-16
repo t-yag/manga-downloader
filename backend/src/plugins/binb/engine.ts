@@ -12,20 +12,14 @@ import type {
 
 const log = logger.child({ module: 'BinbEngine' });
 
-interface ImageCapture {
-  url: string;
-  buffer: Buffer;
-  size: number;
-  timestamp: number;
-}
-
 export class BinbEngine {
   private browser: Browser | null = null;
   private page: Page | null = null;
-  private imageRequests: ImageCapture[] = [];
-  private currentImageIndex = 0;
+  /** Map of blob URL → captured image buffer */
+  private blobBuffers: Map<string, Buffer> = new Map();
   private headless: boolean;
   private executablePath?: string;
+  private totalPages: number = 0;
 
   constructor(headless: boolean, executablePath?: string) {
     this.headless = headless;
@@ -37,10 +31,10 @@ export class BinbEngine {
 
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Browser launch options
+    // Use portrait viewport to force single-page display mode
     const launchOptions = {
       headless: this.headless,
-      defaultViewport: { width: 1280, height: 800 },
+      defaultViewport: { width: 800, height: 1200 },
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
       ...(this.executablePath ? { executablePath: this.executablePath } : {}),
     };
@@ -61,27 +55,17 @@ export class BinbEngine {
       log.info(`Cookies set: ${cookies.length}`);
     }
 
-    // Monitor HTTP responses to capture blob URL requests
+    // Capture all blob image responses into the map (keyed by URL)
     this.page.on('response', async (response) => {
       const url = response.url();
-
-      // Record only blob URL requests (descrambled images)
       if (
         url.startsWith('blob:') &&
         response.headers()['content-type']?.includes('image/')
       ) {
         try {
           const buffer = await response.buffer();
-          const timestamp = Date.now();
-
-          this.imageRequests.push({
-            url,
-            buffer,
-            size: buffer.length,
-            timestamp,
-          });
+          this.blobBuffers.set(url, buffer);
         } catch (e: any) {
-          // Ignore harmless errors like preflight requests
           if (
             !e.message?.includes('preflight') &&
             !e.message?.includes('Could not load response body')
@@ -101,60 +85,136 @@ export class BinbEngine {
       timeout: 60000,
     });
 
-    log.info('Waiting for initial images...');
+    // Wait for slider to become available (indicates viewer is ready)
+    this.totalPages = await this.waitForSlider();
 
-    // Wait for the first 3 images to load (max 6 seconds)
+    log.info(`Reader loaded, ${this.blobBuffers.size} blobs captured, totalPages=${this.totalPages}`);
+  }
+
+  /**
+   * Wait for the jQuery UI slider to become available, then read total page count.
+   * Replaces fixed 3s wait + separate detection step.
+   */
+  private async waitForSlider(timeoutMs = 15000): Promise<number> {
+    if (!this.page) return 0;
+
     const startTime = Date.now();
-    const timeout = 6000;
-    const targetImages = 3;
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const sliderMax = await this.page.evaluate(
+          `(function() {
+            try {
+              if (window.jQuery && document.getElementById('slider')) {
+                return window.jQuery('#slider').slider('option', 'max');
+              }
+            } catch(e) {}
+            return null;
+          })()`
+        );
 
-    while (this.imageRequests.length < targetImages) {
-      if (Date.now() - startTime > timeout) {
-        log.warn(`Timeout waiting for initial images (got ${this.imageRequests.length}/${targetImages})`);
-        break;
+        if (typeof sliderMax === 'number' && sliderMax > 0) {
+          log.info(`Slider max: ${sliderMax}`);
+          return sliderMax + 1;
+        }
+      } catch { /* not ready yet */ }
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    log.error('Could not detect total pages from slider');
+    return 0;
+  }
+
+  /**
+   * Navigate to a specific page and wait for its blob URLs to appear in the DOM.
+   * Combines navigation + DOM polling to eliminate fixed waits.
+   * Returns blob URLs sorted by vertical position (top to bottom).
+   */
+  private async navigateAndGetBlobUrls(pageIndex: number, timeoutMs = 10000): Promise<string[]> {
+    if (!this.page) throw new Error('Page not initialized');
+
+    await this.page.evaluate(
+      `BBAppMovePage(JSON.stringify({page: ${pageIndex}}))`
+    );
+
+    // Poll DOM until blob URLs appear in the visible content div
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const urls = await this.page.evaluate(
+        `(function() {
+          var divs = document.querySelectorAll('[id^="content-p"]');
+          for (var i = 0; i < divs.length; i++) {
+            var rect = divs[i].getBoundingClientRect();
+            if (rect.left >= 0 && rect.left < window.innerWidth) {
+              var imgs = divs[i].querySelectorAll('img[src^="blob:"]');
+              if (imgs.length === 0) return [];
+              var sorted = Array.from(imgs).sort(function(a, b) {
+                return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+              });
+              return sorted.map(function(img) { return img.src; });
+            }
+          }
+          return [];
+        })()`
+      ) as string[];
+
+      if (urls.length > 0) {
+        return urls;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    const elapsed = Date.now() - startTime;
-    log.info(`Reader loaded in ${elapsed}ms, ${this.imageRequests.length} images captured`);
+    log.warn(`Timeout waiting for blob URLs on page ${pageIndex}`);
+    return [];
   }
 
-  private async extractPageImages() {
-    // Get 3 images from current index
-    const startIndex = this.currentImageIndex;
-    const endIndex = Math.min(startIndex + 3, this.imageRequests.length);
+  /**
+   * Wait until all blob URLs for a page have been captured.
+   */
+  private async waitForBlobs(urls: string[], timeoutMs = 10000): Promise<Buffer[]> {
+    const startTime = Date.now();
 
-    if (startIndex >= this.imageRequests.length) {
-      return { images: [] };
+    while (Date.now() - startTime < timeoutMs) {
+      const allPresent = urls.every((url) => this.blobBuffers.has(url));
+      if (allPresent) {
+        return urls.map((url) => this.blobBuffers.get(url)!);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    const pageImages = this.imageRequests.slice(startIndex, endIndex);
-
-    // Advance index
-    this.currentImageIndex = endIndex;
-
-    return {
-      images: pageImages,
-    };
+    // Return whatever we have
+    log.warn(`Timeout waiting for blobs (got ${urls.filter((u) => this.blobBuffers.has(u)).length}/${urls.length})`);
+    return urls
+      .filter((url) => this.blobBuffers.has(url))
+      .map((url) => this.blobBuffers.get(url)!);
   }
 
-  private async combineImages(
-    imageBuffers: Buffer[],
+  private async combineStrips(
+    stripBuffers: Buffer[],
     pageNumber: number,
     outputDir: string
   ): Promise<{ outputPath: string; width: number; height: number }> {
-    // Overlap values (from investigation)
-    const OVERLAP_1_TO_2 = 7; // Boundary between image 1 -> 2: 7px
-    const OVERLAP_2_TO_3 = 6; // Boundary between image 2 -> 3: 6px
+    if (stripBuffers.length === 1) {
+      // Single image, no combining needed
+      const metadata = await sharp(stripBuffers[0]).metadata();
+      const outputPath = path.join(
+        outputDir,
+        `page_${String(pageNumber).padStart(3, '0')}.jpg`
+      );
+      await sharp(stripBuffers[0]).jpeg({ quality: 95 }).toFile(outputPath);
+      return { outputPath, width: metadata.width!, height: metadata.height! };
+    }
 
-    // Get metadata for each image
+    // Get metadata for each strip
     const metadatas = await Promise.all(
-      imageBuffers.map((buffer) => sharp(buffer).metadata())
+      stripBuffers.map((buffer) => sharp(buffer).metadata())
     );
 
-    // Calculate height considering overlap
-    // image1 + (image2 - overlap1) + (image3 - overlap2)
+    // Detect overlap by comparing bottom of strip N with top of strip N+1
+    // Use fixed overlap values (determined empirically for binb viewer)
+    const OVERLAP_1_TO_2 = 7;
+    const OVERLAP_2_TO_3 = 6;
+
     let totalHeight = metadatas[0].height!;
     if (metadatas.length >= 2) {
       totalHeight += metadatas[1].height! - OVERLAP_1_TO_2;
@@ -165,7 +225,6 @@ export class BinbEngine {
 
     const maxWidth = Math.max(...metadatas.map((meta) => meta.width!));
 
-    // Create empty canvas
     let composite = sharp({
       create: {
         width: maxWidth,
@@ -175,18 +234,16 @@ export class BinbEngine {
       },
     });
 
-    // Position each image (considering overlap)
     const compositeImages: sharp.OverlayOptions[] = [];
     let yOffset = 0;
 
-    for (let i = 0; i < imageBuffers.length; i++) {
+    for (let i = 0; i < stripBuffers.length; i++) {
       compositeImages.push({
-        input: imageBuffers[i],
+        input: stripBuffers[i],
         top: yOffset,
         left: 0,
       });
 
-      // Calculate offset for next image (subtract overlap)
       if (i === 0) {
         yOffset += metadatas[i].height! - OVERLAP_1_TO_2;
       } else if (i === 1) {
@@ -196,7 +253,6 @@ export class BinbEngine {
       }
     }
 
-    // Combine images and save
     const outputPath = path.join(
       outputDir,
       `page_${String(pageNumber).padStart(3, '0')}.jpg`
@@ -206,89 +262,68 @@ export class BinbEngine {
     return { outputPath, width: maxWidth, height: totalHeight };
   }
 
-  private async nextPage(maxRetries = 2): Promise<boolean> {
-    if (!this.page) {
-      throw new Error('Page not initialized');
-    }
-
-    const currentImageCount = this.imageRequests.length;
-    const targetImageCount = currentImageCount + 3;
-
-    // Navigate page with ArrowLeft key
-    await this.page.keyboard.press('ArrowLeft');
-
-    // Wait for new images, with extended wait on retry (don't re-press key)
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const timeout = attempt === 0 ? 10000 : 5000;
-      const startTime = Date.now();
-
-      while (this.imageRequests.length < targetImageCount) {
-        if (Date.now() - startTime > timeout) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-
-      if (this.imageRequests.length >= targetImageCount) break;
-
-      if (attempt < maxRetries) {
-        log.warn(`Page load timeout (got ${this.imageRequests.length - currentImageCount}/3 images), extending wait (${attempt + 1}/${maxRetries})`);
-      }
-    }
-
-    const newImagesCount = this.imageRequests.length - currentImageCount;
-    return newImagesCount > 0;
-  }
-
   async *download(
     job: DownloadJob
   ): AsyncGenerator<DownloadProgress, DownloadResult> {
     const startTime = Date.now();
-    let pageNumber = 1;
-    let continueProcessing = true;
+
+    if (this.totalPages === 0) {
+      throw new Error('Total pages not detected');
+    }
+
+    log.info(`Starting download: ${this.totalPages} pages`);
 
     yield {
       phase: 'init',
       progress: 0,
-      message: 'Initializing download',
+      totalPages: this.totalPages,
+      message: `Downloading ${this.totalPages} pages`,
     };
 
-    while (continueProcessing) {
-      // Check if we need to load the next page
-      const imagesNeeded = pageNumber * 3;
-      if (this.imageRequests.length < imagesNeeded) {
-        const hasMorePages = await this.nextPage();
+    let savedPages = 0;
 
-        if (!hasMorePages) {
-          break;
-        }
+    // BBAppMovePage page index: 0 = cover (first page), totalPages-1 = last page
+    // Output: page_001.jpg = cover, page_059.jpg = last
+    for (let pageIndex = 0; pageIndex < this.totalPages; pageIndex++) {
+      // Navigate and wait for blob URLs to appear in DOM
+      const blobUrls = await this.navigateAndGetBlobUrls(pageIndex);
+
+      if (blobUrls.length === 0) {
+        log.error(`No blob URLs for page ${pageIndex}, skipping`);
+        continue;
       }
 
-      // Extract page images
-      const { images } = await this.extractPageImages();
+      // Wait for all blob buffers to be captured
+      const buffers = await this.waitForBlobs(blobUrls);
 
-      if (images.length > 0) {
-        await this.combineImages(
-          images.map((img) => img.buffer),
-          pageNumber,
-          job.outputDir
-        );
-
-        yield {
-          phase: 'downloading',
-          progress: 0,
-          currentPage: pageNumber,
-          message: `${pageNumber}`,
-        };
-
-        pageNumber++;
-      } else {
-        continueProcessing = false;
+      if (buffers.length === 0) {
+        log.warn(`No buffers captured for page ${pageIndex}, skipping`);
+        continue;
       }
+
+      const pageNum = pageIndex + 1;
+      await this.combineStrips(buffers, pageNum, job.outputDir);
+      savedPages++;
+
+      // Free captured blobs for this page to limit memory usage
+      for (const url of blobUrls) {
+        this.blobBuffers.delete(url);
+      }
+
+      const progress = (pageIndex + 1) / this.totalPages;
+
+      yield {
+        phase: 'downloading',
+        progress,
+        currentPage: pageIndex + 1,
+        totalPages: this.totalPages,
+        message: `${pageIndex + 1}/${this.totalPages}`,
+      };
     }
 
-    const totalPages = pageNumber - 1;
     const totalTime = Date.now() - startTime;
 
-    // Get file size (approximate from all pages)
+    // Get file size
     const files = await fs.readdir(job.outputDir);
     const imageFiles = files.filter((f) => f.startsWith('page_') && f.endsWith('.jpg'));
     let totalSize = 0;
@@ -297,15 +332,17 @@ export class BinbEngine {
       totalSize += stat.size;
     }
 
+    log.info(`Download complete: ${savedPages}/${this.totalPages} pages in ${totalTime}ms`);
+
     yield {
       phase: 'done',
       progress: 1.0,
-      totalPages,
+      totalPages: savedPages,
       message: 'Download completed',
     };
 
     return {
-      totalPages,
+      totalPages: savedPages,
       totalTime,
       filePath: job.outputDir,
       fileSize: totalSize,

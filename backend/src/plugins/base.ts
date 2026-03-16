@@ -79,6 +79,10 @@ export interface VolumeAvailability {
   reason: string;
   /** Raw ViewMode from the content API (plugin-specific) */
   viewMode?: number;
+  /** Override the stored readerUrl (e.g. free volumes may use a different cid) */
+  overrideReaderUrl?: string;
+  /** Override the stored contentKey */
+  overrideContentKey?: string;
 }
 
 export interface VolumeQuery {
