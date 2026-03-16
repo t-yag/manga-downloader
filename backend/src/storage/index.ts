@@ -7,13 +7,14 @@ import { logger } from "../logger.js";
 
 const log = logger.child({ module: "Storage" });
 
-const DEFAULT_PATH_TEMPLATE = "{plugin}/{title}/vol_{volume}";
+const DEFAULT_PATH_TEMPLATE = "{title}_vol_{volume}";
 
 interface PathTemplateVars {
   plugin: string;
   title: string;
   volume: number;
   author?: string;
+  tags?: string[];
 }
 
 function sanitize(value: string): string {
@@ -40,11 +41,18 @@ export function resolveOutputPath(vars: PathTemplateVars): {
 
   const volStr = String(vars.volume).padStart(3, "0");
 
-  const resolved = template
+  const tagsStr = (vars.tags ?? []).join(" ");
+
+  let resolved = template
     .replace(/\{plugin\}/g, sanitize(vars.plugin))
     .replace(/\{title\}/g, sanitize(vars.title))
     .replace(/\{volume\}/g, volStr)
-    .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"));
+    .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"))
+    .replace(/\{tags\}/g, tagsStr ? sanitize(tagsStr) : "")
+    .replace(/\{tags_paren\}/g, tagsStr ? `(${sanitize(tagsStr)})` : "");
+
+  // Clean up trailing separators from empty variables
+  resolved = resolved.replace(/[\s\-_]+$/g, "").replace(/\/[\s\-_]+\//g, "/");
 
   const fullPath = path.resolve(basePath, resolved);
   // The last segment becomes the zip filename

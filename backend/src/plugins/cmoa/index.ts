@@ -15,7 +15,7 @@ import { CmoaAuth } from "./auth.js";
 import { CmoaScraper } from "./scraper.js";
 import { BinbEngine } from "../binb/engine.js";
 import { logger } from "../../logger.js";
-import axios from "axios";
+import * as cheerio from "cheerio";
 
 const log = logger.child({ module: "Cmoa" });
 
@@ -58,103 +58,82 @@ class CmoaUrlParser implements UrlParser {
 
 /**
  * Cmoa availability checker
- * Uses bibGetCntntInfo API to check if volumes are accessible
+ * Scrapes the authenticated title page HTML to detect purchased/free volumes.
+ * Purchased volumes have `/reader/browserviewer/?content_id=...` links.
+ * Free volumes have `/reader/sample/?content_id=...` links with GA_free class.
+ * All other volumes are considered not purchased.
+ *
+ * This approach requires only 1-2 HTTP requests (paginated title pages)
+ * instead of N per-volume API calls.
  */
 class CmoaAvailabilityChecker implements AvailabilityChecker {
-  /** Delay between API requests to avoid CMOA rate limiting (ms) */
-  private readonly REQUEST_DELAY = 1500;
-  /** Max retries for rate-limited requests */
-  private readonly MAX_RETRIES = 2;
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
+  private readonly baseUrl = "https://www.cmoa.jp";
 
   async checkAvailability(
     titleId: string,
     volumes: number[],
     session: SessionData | null
   ): Promise<VolumeAvailability[]> {
-    const results: VolumeAvailability[] = [];
-
     const cookieString = session?.cookies
       ?.map((c) => `${c.name}=${c.value}`)
       .join("; ") ?? "";
 
-    log.info(`Checking ${volumes.length} volume(s) for titleId=${titleId}`);
+    log.info(`Checking ${volumes.length} volume(s) for titleId=${titleId} via HTML scraping`);
 
-    for (let i = 0; i < volumes.length; i++) {
-      const vol = volumes[i];
+    // Fetch all paginated title pages and collect purchased volume numbers
+    // Purchased volumes have `/reader/browserviewer/?content_id=...` links.
+    // All other volumes (with sample/trial links or cart buttons) are not purchased.
+    const purchased = new Set<number>();
 
-      // Delay between requests to avoid rate limiting (skip first request)
-      if (i > 0) {
-        await this.delay(this.REQUEST_DELAY);
+    let page = 1;
+    let hasNext = true;
+    while (hasNext) {
+      const url = `${this.baseUrl}/title/${titleId}/?page=${page}&order=up`;
+      log.debug(`Fetching title page ${page}: ${url}`);
+
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Cookie: cookieString,
+        },
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch title page ${page}: HTTP ${response.status}`);
+        break;
       }
 
-      const result = await this.checkSingleVolume(titleId, vol, cookieString);
-      results.push(result);
+      const html = await response.text();
+      const $ = cheerio.load(html);
+
+      // Purchased volumes: browserviewer links with content_id
+      $('a[href*="reader/browserviewer"]').each((_, el) => {
+        const href = $(el).attr("href") || "";
+        const match = href.match(/content_id=\d(\d{10})(\d{4})/);
+        if (match) purchased.add(parseInt(match[2], 10));
+      });
+
+      // Check for next page
+      const nextLink = $(`.pagination a[href*="page=${page + 1}"]`);
+      hasNext = nextLink.length > 0;
+      page++;
     }
 
-    const purchased = results.filter((r) => r.available).length;
-    log.info(`Done: ${purchased}/${results.length} available`);
+    log.info(`HTML scrape done (${page - 1} page(s)): ${purchased.size} purchased`);
+
+    // Map results for requested volumes
+    const results: VolumeAvailability[] = volumes.map((vol) => {
+      if (purchased.has(vol)) {
+        return { volume: vol, available: true, reason: "purchased" };
+      }
+      return { volume: vol, available: false, reason: "not_purchased" };
+    });
+
+    const availableCount = results.filter((r) => r.available).length;
+    log.info(`Result: ${availableCount}/${results.length} available`);
 
     return results;
-  }
-
-  private async checkSingleVolume(
-    titleId: string,
-    vol: number,
-    cookieString: string,
-    attempt = 0,
-  ): Promise<VolumeAvailability> {
-    try {
-      const paddedTitleId = String(titleId).padStart(10, "0");
-      const cid = `${paddedTitleId}_jp_${String(vol).padStart(4, "0")}`;
-      const dmytime = Date.now();
-
-      const response = await axios.get(
-        `https://www.cmoa.jp/bib/sws/bibGetCntntInfo.php?cid=${cid}&dmytime=${dmytime}&k=testKey&u0=0&u1=0`,
-        {
-          headers: {
-            Accept: "*/*",
-            Cookie: cookieString,
-            Referer: "https://www.cmoa.jp/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          },
-          timeout: 10000,
-        }
-      );
-
-      const data = response.data;
-      const item = data.items?.[0];
-      log.debug(`vol=${vol} cid=${cid} result=${data.result} items=${data.items?.length ?? 0}`);
-
-      // Detect rate-limited response: result=0 but items exist with empty ViewMode
-      const isRateLimited = Number(data.result) === 0 && data.items?.length > 0 && !item?.ViewMode;
-      if (isRateLimited && attempt < this.MAX_RETRIES) {
-        const backoff = this.REQUEST_DELAY * (attempt + 2);
-        log.warn(`vol=${vol} rate-limited, retrying in ${backoff}ms (attempt ${attempt + 1}/${this.MAX_RETRIES})`);
-        await this.delay(backoff);
-        return this.checkSingleVolume(titleId, vol, cookieString, attempt + 1);
-      }
-
-      if (Number(data.result) === 0 || !data.items?.length) {
-        return { volume: vol, available: false, reason: isRateLimited ? "rate_limited" : "not_purchased" };
-      }
-
-      const isFullAccess =
-        Number(item.ViewMode) === 1 &&
-        (!item.LastPageURL || item.LastPageURL.includes("sample_flg=0"));
-
-      return {
-        volume: vol,
-        available: isFullAccess,
-        reason: isFullAccess ? "purchased" : "not_purchased",
-      };
-    } catch (error: any) {
-      log.error(`vol=${vol} error: ${error.message}`);
-      return { volume: vol, available: false, reason: "unknown" };
-    }
   }
 }
 

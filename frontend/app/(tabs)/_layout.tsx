@@ -39,6 +39,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="tags"
+        options={{
+          title: "タグ管理",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="pricetag" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="jobs/index"
         options={{
           title: "ジョブ",

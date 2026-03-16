@@ -24,6 +24,7 @@ export const library = sqliteTable(
     totalVolumes: integer("total_volumes"),
     coverUrl: text("cover_url"),
     metadata: text("metadata"), // JSON (plugin-specific)
+    displayGenres: text("display_genres"), // JSON array (tag-rule-applied cache)
     createdAt: text("created_at").default(sql`(datetime('now'))`),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
     lastAccessedAt: text("last_accessed_at").default(sql`(datetime('now'))`),
@@ -44,6 +45,8 @@ export const volumes = sqliteTable(
     }).default("unknown"),
     /** "purchased", "free", "subscription", "not_purchased", "unknown" */
     availabilityReason: text("availability_reason"),
+    /** ISO date string — free campaign expiry (e.g. "2026-03-31") */
+    freeUntil: text("free_until"),
     pageCount: integer("page_count"),
     filePath: text("file_path"),
     fileSize: integer("file_size"),
@@ -80,3 +83,19 @@ export const settings = sqliteTable("settings", {
   value: text("value"), // JSON
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
+
+export const tagRules = sqliteTable(
+  "tag_rules",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    original: text("original").notNull(), // raw tag (case-insensitive match)
+    action: text("action", {
+      enum: ["show", "map", "hide"],
+    }).notNull(),
+    mappedTo: text("mapped_to"), // target tag when action='map'
+    createdAt: text("created_at").default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    uniqueIndex("tag_rules_original_idx").on(table.original),
+  ]
+);

@@ -16,6 +16,7 @@ const SIDEBAR_WIDTH = 180;
 
 const SIDEBAR_ITEMS: { href: string; matchPrefix: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { href: "/", matchPrefix: "/", title: "ライブラリ", icon: "library" },
+  { href: "/tags", matchPrefix: "/tags", title: "タグ管理", icon: "pricetag" },
   { href: "/jobs", matchPrefix: "/jobs", title: "ジョブ", icon: "download" },
   { href: "/settings", matchPrefix: "/settings", title: "設定", icon: "settings" },
 ];

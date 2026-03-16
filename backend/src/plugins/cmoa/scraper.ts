@@ -40,8 +40,11 @@ export class CmoaScraper implements MetadataProvider {
       // Extract genres
       const genres = this.extractGenres($);
 
+      // Detect free campaign volumes from HTML
+      const freeVolumes = this.extractFreeVolumes($, html);
+
       // Generate volume URLs
-      const volumes = this.generateVolumeUrls(titleId, totalVolumes);
+      const volumes = this.generateVolumeUrls(titleId, totalVolumes, freeVolumes);
 
       // Try to extract cover URL
       const coverUrl = this.extractCoverUrl($);
@@ -195,9 +198,73 @@ export class CmoaScraper implements MetadataProvider {
   }
 
   /**
+   * Extract free campaign volumes from HTML.
+   * Returns a map of volumeNum → freeUntil ISO date string.
+   */
+  private extractFreeVolumes($: cheerio.CheerioAPI, html: string): Map<number, string | null> {
+    const freeMap = new Map<number, string | null>();
+    const paddedTitleId = String("").padStart(10, "0"); // unused, we match by content_id pattern
+
+    // Find all links to this title's content with GA_free or free_btn class nearby
+    // Pattern 1: "無料で読む" button with expiry (vol detail page / title page)
+    //   <a href="/reader/sample/?title_id=207712&content_id=100002077120001">
+    //     <div class="GA_free btn free ..."><span>無料で読む</span><span>3/31まで</span></div>
+    //   </a>
+    // Pattern 2: Small free button on volume list
+    //   <a href="/reader/sample/?title_id=207712&content_id=100002077120003">
+    //     <div class="title_vol_each_free_btn GA_free"></div>
+    //   </a>
+
+    $('a[href*="reader/sample"]').each((_, el) => {
+      const href = $(el).attr("href") || "";
+      // content_id format: 1 + titleId(10) + vol(4) = 15 digits total
+      const contentIdMatch = href.match(/content_id=\d(\d{10})(\d{4})/);
+      if (!contentIdMatch) return;
+
+      const volNum = parseInt(contentIdMatch[2], 10);
+      const context = $(el).html() || "";
+
+      // Check if this is a free reading button (not just a trial reading link)
+      const isFreeBtn =
+        context.includes("GA_free") ||
+        context.includes("free_btn") ||
+        $(el).find(".GA_free, .title_vol_each_free_btn").length > 0 ||
+        $(el).hasClass("GA_free");
+
+      if (!isFreeBtn) return;
+
+      // Extract expiry date (e.g., "3/31まで")
+      let freeUntil: string | null = null;
+      const expiryMatch = context.match(/(\d{1,2})\/(\d{1,2})まで/);
+      if (expiryMatch) {
+        const month = parseInt(expiryMatch[1], 10);
+        const day = parseInt(expiryMatch[2], 10);
+        // Determine year: if the month is in the past, assume next year
+        const now = new Date();
+        let year = now.getFullYear();
+        const candidate = new Date(year, month - 1, day);
+        if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)) {
+          year += 1;
+        }
+        freeUntil = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+
+      if (!freeMap.has(volNum)) {
+        freeMap.set(volNum, freeUntil);
+      }
+    });
+
+    return freeMap;
+  }
+
+  /**
    * Generate volume URLs for all volumes
    */
-  private generateVolumeUrls(titleId: string, totalVolumes: number): VolumeInfo[] {
+  private generateVolumeUrls(
+    titleId: string,
+    totalVolumes: number,
+    freeVolumes?: Map<number, string | null>,
+  ): VolumeInfo[] {
     const volumes: VolumeInfo[] = [];
 
     for (let volNum = 1; volNum <= totalVolumes; volNum++) {
@@ -208,6 +275,7 @@ export class CmoaScraper implements MetadataProvider {
         contentKey: urlInfo.contentId,
         detailUrl: urlInfo.detailUrl,
         thumbnailUrl: CmoaScraper.generateThumbnailUrl(titleId, volNum),
+        freeUntil: freeVolumes?.get(volNum) ?? undefined,
       });
     }
 

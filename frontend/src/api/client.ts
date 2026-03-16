@@ -67,6 +67,7 @@ export interface LibraryTitle {
   totalVolumes: number | null;
   coverUrl: string | null;
   genres: string[];
+  displayGenres: string[] | null;
   volumeSummary: {
     total: number;
     downloaded: number;
@@ -81,6 +82,7 @@ export interface Volume {
   volumeNum: number;
   status: string;
   availabilityReason: string | null;
+  freeUntil: string | null;
   pageCount: number | null;
   filePath: string | null;
   thumbnailUrl: string | null;
@@ -263,6 +265,89 @@ export function updateSettings(settings: Record<string, unknown>) {
   return request<{ message: string }>("/api/settings", {
     method: "PUT",
     body: JSON.stringify(settings),
+  });
+}
+
+// --- Tag Rules ---
+
+export interface TagRule {
+  id: number;
+  original: string;
+  action: "show" | "map" | "hide";
+  mappedTo: string | null;
+}
+
+export interface TagDiscoverItem {
+  tag: string;
+  count: number;
+  plugins: string[];
+  rule: { id: number; action: "show" | "map" | "hide"; mappedTo: string | null } | null;
+}
+
+export function discoverTags(pluginId?: string) {
+  const qs = pluginId ? `?pluginId=${pluginId}` : "";
+  return request<{ tags: TagDiscoverItem[] }>(`/api/tags/discover${qs}`);
+}
+
+export interface TagItemEntry {
+  id: number;
+  pluginId: string;
+  title: string;
+  author: string | null;
+  coverUrl: string | null;
+}
+
+export function getTagItems(tag: string, params?: { limit?: number; offset?: number }) {
+  const q = new URLSearchParams({ tag });
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.offset != null) q.set("offset", String(params.offset));
+  return request<{ items: TagItemEntry[]; total: number }>(`/api/tags/items?${q}`);
+}
+
+export function getTagRules() {
+  return request<TagRule[]>("/api/tag-rules");
+}
+
+export function createTagRule(params: {
+  original: string;
+  action: "show" | "map" | "hide";
+  mappedTo?: string | null;
+}) {
+  return request<TagRule>("/api/tag-rules", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export function updateTagRule(
+  id: number,
+  params: { action?: "show" | "map" | "hide"; mappedTo?: string | null }
+) {
+  return request<{ message: string }>(`/api/tag-rules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(params),
+  });
+}
+
+export function deleteTagRule(id: number) {
+  return request<{ message: string }>(`/api/tag-rules/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function importTagRules(params: {
+  mode: "merge" | "replace";
+  rules: Record<string, string | null>;
+}) {
+  return request<{ message: string; created: number; updated: number }>(
+    "/api/tag-rules/import",
+    { method: "POST", body: JSON.stringify(params) }
+  );
+}
+
+export function rebuildDisplayGenres() {
+  return request<{ message: string; updated: number }>("/api/tag-rules/rebuild", {
+    method: "POST",
   });
 }
 

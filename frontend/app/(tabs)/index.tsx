@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,8 +11,11 @@ import {
   Image,
   Pressable,
   ScrollView,
+  Keyboard,
+  Platform,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
   useQuery,
@@ -68,7 +71,24 @@ function Dropdown({
 export default function LibraryScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("");
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+
+  // Track keyboard height and adjust bottom offset manually
+  // (KeyboardAvoidingView doesn't work reliably inside tab navigators)
+  useEffect(() => {
+    const tabBarHeight = 56;
+    const show = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => setKeyboardOffset(e.endCoordinates.height - tabBarHeight)
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardOffset(0)
+    );
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   // Filter / sort state
   const [search, setSearch] = useState("");
@@ -146,7 +166,7 @@ export default function LibraryScreen() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["library"] });
       setUrl("");
-      router.push(`/library/${data.id}`);
+      router.push(`/library/${data.id}?autoSync=true`);
       toast.success("ライブラリに追加しました", { description: data.title });
     },
     onError: (err: Error) =>
@@ -256,12 +276,179 @@ export default function LibraryScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Add title */}
+    <View style={[styles.container, keyboardOffset > 0 && { paddingBottom: keyboardOffset }]}>
+      <View style={{ flex: 1 }}>
+        {/* Filter / Sort bar */}
+        <View style={styles.filterRow}>
+          <View style={styles.searchBox}>
+            <Ionicons
+              name="search"
+              size={14}
+              color="#64748b"
+              style={{ marginRight: 6 }}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="タイトル検索..."
+              placeholderTextColor="#475569"
+              value={search}
+              onChangeText={handleSearchChange}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {search.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearch("");
+                  setDebouncedSearch("");
+                }}
+              >
+                <Ionicons name="close-circle" size={14} color="#475569" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Plugin filter button + dropdown */}
+          <View style={{ position: "relative" }}>
+            <TouchableOpacity
+              style={[styles.filterBtn, selectedPlugin && styles.filterBtnActive]}
+              onPress={() =>
+                setOpenMenu((m) => (m === "plugin" ? null : "plugin"))
+              }
+            >
+              <Ionicons name="funnel-outline" size={13} color={selectedPlugin ? "#60a5fa" : "#94a3b8"} />
+              <Text
+                style={[styles.filterBtnText, selectedPlugin && styles.filterBtnTextActive]}
+                numberOfLines={1}
+              >
+                {pluginLabel}
+              </Text>
+            </TouchableOpacity>
+            <Dropdown
+              visible={openMenu === "plugin"}
+              onClose={() => setOpenMenu(null)}
+            >
+              <DropdownItem
+                label="すべて"
+                selected={!selectedPlugin}
+                onPress={() => {
+                  setSelectedPlugin(undefined);
+                  setOpenMenu(null);
+                }}
+              />
+              {plugins.map((p) => (
+                <DropdownItem
+                  key={p.id}
+                  label={PLUGIN_LABELS[p.id] ?? p.name}
+                  selected={selectedPlugin === p.id}
+                  onPress={() => {
+                    setSelectedPlugin(p.id);
+                    setOpenMenu(null);
+                  }}
+                />
+              ))}
+            </Dropdown>
+          </View>
+
+          {/* Sort button + dropdown */}
+          <View style={{ position: "relative" }}>
+            <TouchableOpacity
+              style={styles.filterBtn}
+              onPress={() =>
+                setOpenMenu((m) => (m === "sort" ? null : "sort"))
+              }
+            >
+              <Ionicons name="swap-vertical-outline" size={13} color="#94a3b8" />
+              <Text style={styles.filterBtnText} numberOfLines={1}>
+                {sortLabel}
+              </Text>
+            </TouchableOpacity>
+            <Dropdown
+              visible={openMenu === "sort"}
+              onClose={() => setOpenMenu(null)}
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <DropdownItem
+                  key={opt.key}
+                  label={opt.label}
+                  selected={sort === opt.key}
+                  onPress={() => {
+                    setSort(opt.key);
+                    setOpenMenu(null);
+                  }}
+                />
+              ))}
+            </Dropdown>
+          </View>
+        </View>
+
+        {/* Result count */}
+        {!isLoading && (
+          <Text style={styles.resultCount}>{total}件</Text>
+        )}
+
+        {/* Library List */}
+        {isLoading ? (
+          <ActivityIndicator
+            style={{ marginTop: 40 }}
+            size="large"
+            color="#60a5fa"
+          />
+        ) : (
+          <FlatList
+            data={titles}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={renderTitle}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            onEndReached={handleEndReached}
+            onEndReachedThreshold={0.5}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#60a5fa"
+                colors={["#60a5fa"]}
+              />
+            }
+            ListFooterComponent={
+              isFetchingNextPage ? (
+                <ActivityIndicator
+                  style={{ paddingVertical: 16 }}
+                  color="#60a5fa"
+                />
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons
+                  name="library-outline"
+                  size={48}
+                  color="#334155"
+                  style={{ marginBottom: 12 }}
+                />
+                <Text style={styles.emptyTitle}>
+                  {debouncedSearch || selectedPlugin
+                    ? "該当するタイトルがありません"
+                    : "ライブラリは空です"}
+                </Text>
+                {!debouncedSearch && !selectedPlugin && (
+                  <Text style={styles.emptyHint}>
+                    下のURLフィールドから作品を追加して始めましょう
+                  </Text>
+                )}
+              </View>
+            }
+          />
+        )}
+      </View>
+
+      {/* Bottom: Add URL bar */}
       <View style={styles.addRow}>
         <TextInput
           style={styles.addInput}
-          placeholder="作品のURLを貼り付け..."
+          placeholder="URLを貼り付けて追加..."
           placeholderTextColor="#64748b"
           value={url}
           onChangeText={setUrl}
@@ -282,169 +469,6 @@ export default function LibraryScreen() {
           )}
         </TouchableOpacity>
       </View>
-
-      {/* Filter / Sort bar */}
-      <View style={styles.filterRow}>
-        <View style={styles.searchBox}>
-          <Ionicons
-            name="search"
-            size={14}
-            color="#64748b"
-            style={{ marginRight: 6 }}
-          />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="タイトル検索..."
-            placeholderTextColor="#475569"
-            value={search}
-            onChangeText={handleSearchChange}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {search.length > 0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setSearch("");
-                setDebouncedSearch("");
-              }}
-            >
-              <Ionicons name="close-circle" size={14} color="#475569" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Plugin filter button + dropdown */}
-        <View style={{ position: "relative" }}>
-          <TouchableOpacity
-            style={[styles.filterBtn, selectedPlugin && styles.filterBtnActive]}
-            onPress={() =>
-              setOpenMenu((m) => (m === "plugin" ? null : "plugin"))
-            }
-          >
-            <Ionicons name="funnel-outline" size={13} color={selectedPlugin ? "#60a5fa" : "#94a3b8"} />
-            <Text
-              style={[styles.filterBtnText, selectedPlugin && styles.filterBtnTextActive]}
-              numberOfLines={1}
-            >
-              {pluginLabel}
-            </Text>
-          </TouchableOpacity>
-          <Dropdown
-            visible={openMenu === "plugin"}
-            onClose={() => setOpenMenu(null)}
-          >
-            <DropdownItem
-              label="すべて"
-              selected={!selectedPlugin}
-              onPress={() => {
-                setSelectedPlugin(undefined);
-                setOpenMenu(null);
-              }}
-            />
-            {plugins.map((p) => (
-              <DropdownItem
-                key={p.id}
-                label={PLUGIN_LABELS[p.id] ?? p.name}
-                selected={selectedPlugin === p.id}
-                onPress={() => {
-                  setSelectedPlugin(p.id);
-                  setOpenMenu(null);
-                }}
-              />
-            ))}
-          </Dropdown>
-        </View>
-
-        {/* Sort button + dropdown */}
-        <View style={{ position: "relative" }}>
-          <TouchableOpacity
-            style={styles.filterBtn}
-            onPress={() =>
-              setOpenMenu((m) => (m === "sort" ? null : "sort"))
-            }
-          >
-            <Ionicons name="swap-vertical-outline" size={13} color="#94a3b8" />
-            <Text style={styles.filterBtnText} numberOfLines={1}>
-              {sortLabel}
-            </Text>
-          </TouchableOpacity>
-          <Dropdown
-            visible={openMenu === "sort"}
-            onClose={() => setOpenMenu(null)}
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <DropdownItem
-                key={opt.key}
-                label={opt.label}
-                selected={sort === opt.key}
-                onPress={() => {
-                  setSort(opt.key);
-                  setOpenMenu(null);
-                }}
-              />
-            ))}
-          </Dropdown>
-        </View>
-      </View>
-
-      {/* Result count */}
-      {!isLoading && (
-        <Text style={styles.resultCount}>{total}件</Text>
-      )}
-
-      {/* Library List */}
-      {isLoading ? (
-        <ActivityIndicator
-          style={{ marginTop: 40 }}
-          size="large"
-          color="#60a5fa"
-        />
-      ) : (
-        <FlatList
-          data={titles}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderTitle}
-          contentContainerStyle={{ paddingBottom: 20 }}
-          onEndReached={handleEndReached}
-          onEndReachedThreshold={0.5}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#60a5fa"
-              colors={["#60a5fa"]}
-            />
-          }
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <ActivityIndicator
-                style={{ paddingVertical: 16 }}
-                color="#60a5fa"
-              />
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons
-                name="library-outline"
-                size={48}
-                color="#334155"
-                style={{ marginBottom: 12 }}
-              />
-              <Text style={styles.emptyTitle}>
-                {debouncedSearch || selectedPlugin
-                  ? "該当するタイトルがありません"
-                  : "ライブラリは空です"}
-              </Text>
-              {!debouncedSearch && !selectedPlugin && (
-                <Text style={styles.emptyHint}>
-                  上のURLフィールドから作品を追加して始めましょう
-                </Text>
-              )}
-            </View>
-          }
-        />
-      )}
     </View>
   );
 }
@@ -481,11 +505,14 @@ function DropdownItem({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0f172a", padding: 16 },
 
-  // Add row
+  // Add row (bottom-fixed)
   addRow: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#1e293b",
   },
   addInput: {
     flex: 1,
@@ -497,7 +524,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     borderWidth: 1,
     borderColor: "#334155",
-  },
+    outlineStyle: "none",
+  } as any,
   addBtn: {
     backgroundColor: "#2563eb",
     borderRadius: 10,
@@ -529,7 +557,8 @@ const styles = StyleSheet.create({
     color: "#e2e8f0",
     fontSize: 13,
     paddingVertical: 0,
-  },
+    outlineStyle: "none",
+  } as any,
   filterBtn: {
     flexDirection: "row",
     alignItems: "center",

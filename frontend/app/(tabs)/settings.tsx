@@ -46,7 +46,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
-      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{plugin}/{title}/vol_{volume}");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}_vol_{volume}");
     }
   }, [settings]);
 
@@ -204,14 +204,16 @@ export default function SettingsScreen() {
           autoCapitalize="none"
         />
         <Text style={styles.templateHint}>
-          {"変数: {plugin} {title} {volume} {author}"}
+          {"変数: {plugin} {title} {volume} {author} {tags} {tags_paren}"}
         </Text>
         <Text style={styles.templatePreview}>
           例: {basePath}/{pathTemplate
             .replace(/\{plugin\}/g, "cmoa")
             .replace(/\{title\}/g, "タイトル名")
             .replace(/\{volume\}/g, "001")
-            .replace(/\{author\}/g, "著者名")}.zip
+            .replace(/\{author\}/g, "著者名")
+            .replace(/\{tags\}/g, "タグ1_タグ2")
+            .replace(/\{tags_paren\}/g, "(タグ1_タグ2)")}.zip
         </Text>
         <TouchableOpacity
           style={[styles.btn, { marginTop: 4 }]}

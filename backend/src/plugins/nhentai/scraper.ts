@@ -53,7 +53,7 @@ export class NhentaiScraper implements MetadataProvider {
     return this.toTitleInfo(gallery);
   }
 
-  private toTitleInfo(gallery: NhentaiGallery): TitleInfo {
+  private async toTitleInfo(gallery: NhentaiGallery): Promise<TitleInfo> {
     const title =
       gallery.title.japanese || gallery.title.pretty || gallery.title.english;
 
@@ -71,7 +71,7 @@ export class NhentaiScraper implements MetadataProvider {
       .map((t) => t.name);
 
     const coverExt = IMAGE_TYPE_MAP[gallery.images.cover.t] || "jpg";
-    const coverUrl = `${this.thumbBase}/${gallery.media_id}/cover.${coverExt}`;
+    const coverUrl = await this.resolveCoverUrl(gallery.media_id, coverExt);
 
     return {
       titleId: String(gallery.id),
@@ -90,6 +90,38 @@ export class NhentaiScraper implements MetadataProvider {
         },
       ],
     };
+  }
+
+  /**
+   * Resolve a working cover URL by trying the API-reported extension first,
+   * then falling back to jpg (nhentai thumb servers are inconsistent).
+   */
+  private async resolveCoverUrl(mediaId: string, preferredExt: string): Promise<string> {
+    const preferred = `${this.thumbBase}/${mediaId}/cover.${preferredExt}`;
+    try {
+      const res = await fetch(preferred, {
+        method: "HEAD",
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) return preferred;
+    } catch { /* ignore */ }
+
+    // Fallback: try jpg if that wasn't the preferred ext
+    if (preferredExt !== "jpg") {
+      const fallback = `${this.thumbBase}/${mediaId}/cover.jpg`;
+      try {
+        const res = await fetch(fallback, {
+          method: "HEAD",
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) return fallback;
+      } catch { /* ignore */ }
+    }
+
+    // Return preferred URL even if unverified (might work later)
+    return preferred;
   }
 
   async getVolumeInfo(titleId: string, _volume: number): Promise<VolumeInfo> {

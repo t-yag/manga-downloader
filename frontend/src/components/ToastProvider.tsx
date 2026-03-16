@@ -4,7 +4,8 @@ export function ToastProvider() {
   return (
     <Toaster
       theme="dark"
-      position="top-center"
+      position="bottom-center"
+      duration={2500}
       toastOptions={{
         style: {
           backgroundColor: "#1e293b",

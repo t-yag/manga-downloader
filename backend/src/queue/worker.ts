@@ -103,11 +103,15 @@ export class Worker {
 
     // Build download job
     const volumeMeta = volumeData.metadata ? JSON.parse(volumeData.metadata) : {};
+    const displayGenres: string[] = libraryData.displayGenres
+      ? JSON.parse(libraryData.displayGenres)
+      : [];
     const { outputDir, zipPath } = resolveOutputPath({
       plugin: queuedJob.pluginId,
       title: libraryData.title,
       volume: volumeData.volumeNum,
       author: libraryData.author ?? undefined,
+      tags: displayGenres,
     });
 
     // Remove old download if path has changed (e.g. template was updated)

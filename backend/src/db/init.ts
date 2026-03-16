@@ -39,8 +39,10 @@ export function initDatabase(): void {
       total_volumes INTEGER,
       cover_url TEXT,
       metadata TEXT,
+      display_genres TEXT,
       created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      updated_at TEXT DEFAULT (datetime('now')),
+      last_accessed_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS library_plugin_title_idx
@@ -52,6 +54,7 @@ export function initDatabase(): void {
       volume_num INTEGER NOT NULL,
       status TEXT DEFAULT 'unknown',
       availability_reason TEXT,
+      free_until TEXT,
       page_count INTEGER,
       file_path TEXT,
       file_size INTEGER,
@@ -85,35 +88,26 @@ export function initDatabase(): void {
       value TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS tag_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      original TEXT NOT NULL,
+      action TEXT NOT NULL,
+      mapped_to TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS tag_rules_original_idx
+      ON tag_rules(original);
   `);
 
-  // Migrations: add columns if they don't exist yet
-  const volColumns = sqlite
-    .prepare("PRAGMA table_info(volumes)")
-    .all() as { name: string }[];
-  const volColumnNames = new Set(volColumns.map((c) => c.name));
-
-  if (!volColumnNames.has("thumbnail_url")) {
-    sqlite.exec("ALTER TABLE volumes ADD COLUMN thumbnail_url TEXT");
-  }
-
-  const libColumns = sqlite
-    .prepare("PRAGMA table_info(library)")
-    .all() as { name: string }[];
-  const libColumnNames = new Set(libColumns.map((c) => c.name));
-
-  if (!libColumnNames.has("last_accessed_at")) {
-    sqlite.exec("ALTER TABLE library ADD COLUMN last_accessed_at TEXT");
-    sqlite.exec("UPDATE library SET last_accessed_at = COALESCE(updated_at, datetime('now'))");
-  }
-
-  const jobColumns = sqlite
-    .prepare("PRAGMA table_info(jobs)")
-    .all() as { name: string }[];
-  const jobColumnNames = new Set(jobColumns.map((c) => c.name));
-
-  if (!jobColumnNames.has("retry_count")) {
-    sqlite.exec("ALTER TABLE jobs ADD COLUMN retry_count INTEGER DEFAULT 0");
+  // Seed default hide rules for common noise tags (idempotent via INSERT OR IGNORE)
+  const defaultHideRules = ["SALE", "広告掲載中"];
+  const insertRule = sqlite.prepare(
+    "INSERT OR IGNORE INTO tag_rules (original, action) VALUES (?, 'hide')"
+  );
+  for (const original of defaultHideRules) {
+    insertRule.run(original);
   }
 
   sqlite.close();

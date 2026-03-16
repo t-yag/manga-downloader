@@ -4,6 +4,7 @@ import { eq, desc, asc, and, inArray, like, sql, or } from "drizzle-orm";
 import { registry } from "../../plugins/registry.js";
 import { jobQueue } from "../../queue/queue.js";
 import { logger } from "../../logger.js";
+import { getAllRules, updateDisplayGenres } from "../../tags/index.js";
 
 const log = logger.child({ module: "AvailabilityCheck" });
 
@@ -125,6 +126,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         ...t,
         contentType: plugin?.manifest.contentType ?? "series",
         genres: t.genres ? JSON.parse(t.genres) : [],
+        displayGenres: t.displayGenres ? JSON.parse(t.displayGenres) : null,
         volumeSummary: summary,
       };
     });
@@ -195,15 +197,31 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         .returning()
         .get();
 
+      // Compute display_genres
+      const rules = getAllRules();
+      updateDisplayGenres(result.id, JSON.stringify(titleInfo.genres), rules);
+
       // Create volume entries
       // Plugins without availabilityChecker (e.g. standalone/no-auth) are always available
-      const initialStatus = plugin.availabilityChecker ? "unknown" : "available";
+      const hasAvailabilityChecker = !!plugin.availabilityChecker;
       for (const vol of titleInfo.volumes) {
+        let initialStatus: "available" | "unknown";
+        let availabilityReason: string | null = null;
+        if (!hasAvailabilityChecker) {
+          initialStatus = "available";
+        } else if (vol.freeUntil) {
+          initialStatus = "available";
+          availabilityReason = "free";
+        } else {
+          initialStatus = "unknown";
+        }
         db.insert(schema.volumes)
           .values({
             libraryId: result.id,
             volumeNum: vol.volume,
             status: initialStatus,
+            availabilityReason,
+            freeUntil: vol.freeUntil ?? null,
             thumbnailUrl: vol.thumbnailUrl,
             metadata: JSON.stringify({
               readerUrl: vol.readerUrl,
@@ -286,6 +304,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       ...title,
       contentType: plugin?.manifest.contentType ?? "series",
       genres: title.genres ? JSON.parse(title.genres) : [],
+      displayGenres: title.displayGenres ? JSON.parse(title.displayGenres) : null,
       volumes: vols.map((v) => {
         const job = jobsByVolId.get(v.id);
         return {
@@ -334,6 +353,10 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         .where(eq(schema.library.id, title.id))
         .run();
 
+      // Recompute display_genres
+      const refreshRules = getAllRules();
+      updateDisplayGenres(title.id, JSON.stringify(titleInfo.genres), refreshRules);
+
       // Add any new volume entries
       let newVolumes = 0;
       for (const vol of titleInfo.volumes) {
@@ -355,6 +378,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
               libraryId: title.id,
               volumeNum: vol.volume,
               status: volStatus,
+              freeUntil: vol.freeUntil ?? null,
               thumbnailUrl: vol.thumbnailUrl,
               metadata: JSON.stringify({
                 readerUrl: vol.readerUrl,
@@ -364,11 +388,23 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
             })
             .run();
           newVolumes++;
-        } else if (vol.thumbnailUrl && existing.thumbnailUrl !== vol.thumbnailUrl) {
-          db.update(schema.volumes)
-            .set({ thumbnailUrl: vol.thumbnailUrl })
-            .where(eq(schema.volumes.id, existing.id))
-            .run();
+        } else {
+          // Update freeUntil and thumbnailUrl on existing volumes
+          const updates: Record<string, unknown> = {};
+          if (vol.thumbnailUrl && existing.thumbnailUrl !== vol.thumbnailUrl) {
+            updates.thumbnailUrl = vol.thumbnailUrl;
+          }
+          // Always sync freeUntil (may appear, change, or disappear)
+          const newFreeUntil = vol.freeUntil ?? null;
+          if (existing.freeUntil !== newFreeUntil) {
+            updates.freeUntil = newFreeUntil;
+          }
+          if (Object.keys(updates).length > 0) {
+            db.update(schema.volumes)
+              .set(updates)
+              .where(eq(schema.volumes.id, existing.id))
+              .run();
+          }
         }
       }
 
@@ -478,10 +514,24 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         // Don't overwrite queued/downloading statuses
         if (vol.status === "queued" || vol.status === "downloading") continue;
 
+        // ViewMode=3 (sample/free reader) + freeUntil set → treat as free/available
+        let newStatus: "available" | "unavailable";
+        let reason: string;
+        if (result.available) {
+          newStatus = "available";
+          reason = result.reason;
+        } else if (result.viewMode === 3 && vol.freeUntil) {
+          newStatus = "available";
+          reason = "free";
+        } else {
+          newStatus = "unavailable";
+          reason = result.reason;
+        }
+
         db.update(schema.volumes)
           .set({
-            status: result.available ? "available" : "unavailable",
-            availabilityReason: result.reason,
+            status: newStatus,
+            availabilityReason: reason,
             checkedAt: now,
           })
           .where(eq(schema.volumes.id, vol.id))
@@ -548,7 +598,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Helper: check availability for given volumes and update DB
-    async function checkAndUpdate(vols: { id: number; volumeNum: number; status: string | null }[]) {
+    async function checkAndUpdate(vols: { id: number; volumeNum: number; status: string | null; freeUntil: string | null }[]) {
       if (vols.length === 0 || !plugin?.availabilityChecker) return [];
       const session = await resolveSession();
       const results = await plugin.availabilityChecker.checkAvailability(
@@ -560,12 +610,27 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       for (const result of results) {
         const vol = vols.find((v) => v.volumeNum === result.volume);
         if (!vol || vol.status === "queued" || vol.status === "downloading") continue;
+
+        // Determine status/reason considering free campaigns
+        let newStatus: "available" | "unavailable";
+        let newReason: string;
+        if (result.available) {
+          newStatus = "available";
+          newReason = result.reason;
+        } else if (result.viewMode === 3 && vol.freeUntil) {
+          newStatus = "available";
+          newReason = "free";
+        } else {
+          newStatus = "unavailable";
+          newReason = result.reason;
+        }
+
         const update: Record<string, unknown> = {
-          availabilityReason: result.reason,
+          availabilityReason: newReason,
           checkedAt: now,
         };
         if (vol.status !== "done") {
-          update.status = result.available ? "available" : "unavailable";
+          update.status = newStatus;
         }
         db.update(schema.volumes)
           .set(update)
@@ -644,7 +709,6 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
     db.update(schema.library)
       .set({
-        title: titleInfo.seriesTitle,
         author: titleInfo.author,
         genres: JSON.stringify(titleInfo.genres),
         totalVolumes: titleInfo.totalVolumes,
@@ -653,6 +717,10 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       })
       .where(eq(schema.library.id, title.id))
       .run();
+
+    // Recompute display_genres
+    const syncRules = getAllRules();
+    updateDisplayGenres(title.id, JSON.stringify(titleInfo.genres), syncRules);
 
     let newVolumes = 0;
     for (const vol of titleInfo.volumes) {
@@ -674,6 +742,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
             libraryId: title.id,
             volumeNum: vol.volume,
             status: volStatus,
+            freeUntil: vol.freeUntil ?? null,
             thumbnailUrl: vol.thumbnailUrl,
             metadata: JSON.stringify({
               readerUrl: vol.readerUrl,
@@ -683,11 +752,22 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           })
           .run();
         newVolumes++;
-      } else if (vol.thumbnailUrl && existing.thumbnailUrl !== vol.thumbnailUrl) {
-        db.update(schema.volumes)
-          .set({ thumbnailUrl: vol.thumbnailUrl })
-          .where(eq(schema.volumes.id, existing.id))
-          .run();
+      } else {
+        // Update freeUntil and thumbnailUrl on existing volumes
+        const updates: Record<string, unknown> = {};
+        if (vol.thumbnailUrl && existing.thumbnailUrl !== vol.thumbnailUrl) {
+          updates.thumbnailUrl = vol.thumbnailUrl;
+        }
+        const newFreeUntil = vol.freeUntil ?? null;
+        if (existing.freeUntil !== newFreeUntil) {
+          updates.freeUntil = newFreeUntil;
+        }
+        if (Object.keys(updates).length > 0) {
+          db.update(schema.volumes)
+            .set(updates)
+            .where(eq(schema.volumes.id, existing.id))
+            .run();
+        }
       }
     }
 
@@ -717,28 +797,55 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    // Series: check availability for unknown volumes
+    // Promote volumes with freeUntil directly to available/free (no API check needed —
+    // the presence of GA_free button on the title page is sufficient proof)
+    const now = new Date().toISOString();
+    const allVols = db
+      .select()
+      .from(schema.volumes)
+      .where(eq(schema.volumes.libraryId, title.id))
+      .all();
+
+    let freePromoted = 0;
+    for (const vol of allVols) {
+      if (vol.status === "done" || vol.status === "queued" || vol.status === "downloading") continue;
+      if (vol.freeUntil && vol.availabilityReason !== "free" && vol.availabilityReason !== "purchased") {
+        db.update(schema.volumes)
+          .set({ status: "available" as const, availabilityReason: "free", checkedAt: now })
+          .where(eq(schema.volumes.id, vol.id))
+          .run();
+        freePromoted++;
+      } else if (!vol.freeUntil && vol.availabilityReason === "free") {
+        // freeUntil was removed (campaign ended) — reset to unknown for re-check
+        db.update(schema.volumes)
+          .set({ status: "unknown" as const, availabilityReason: null, checkedAt: now })
+          .where(eq(schema.volumes.id, vol.id))
+          .run();
+      }
+    }
+
+    // Series: check availability for unknown + free volumes (free may be purchasable)
     let availabilityResults: { volume: number; available: boolean; reason: string }[] = [];
-    const unknownVols = db
+    const checkTargetVols = db
       .select()
       .from(schema.volumes)
       .where(eq(schema.volumes.libraryId, title.id))
       .all()
-      .filter((v) => v.status === "unknown");
+      .filter((v) => v.status === "unknown" || v.availabilityReason === "free");
 
     try {
-      availabilityResults = await checkAndUpdate(unknownVols);
+      availabilityResults = await checkAndUpdate(checkTargetVols);
     } catch (error) {
       log.error(error, "Availability check failed during sync");
     }
 
-    const availableCount = availabilityResults.filter((r) => r.available).length;
+    const availableCount = availabilityResults.filter((r) => r.available).length + freePromoted;
 
     return {
       message: "Sync complete",
       newVolumes,
       totalVolumes: titleInfo.totalVolumes,
-      checkedVolumes: unknownVols.length,
+      checkedVolumes: checkTargetVols.length + freePromoted,
       availableCount,
     };
   });

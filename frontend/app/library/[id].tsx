@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
   Image,
+  Modal,
   Linking,
   TextInput,
 } from "react-native";
@@ -60,6 +61,29 @@ const REASON_LABELS: Record<string, string> = {
   unknown: "不明",
 };
 
+/** Check if a freeUntil date has expired (date is exclusive end: expired when today > freeUntil) */
+function isFreeExpired(freeUntil: string | null): boolean {
+  if (!freeUntil) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiry = new Date(freeUntil + "T23:59:59");
+  return today > expiry;
+}
+
+function formatFreeUntil(freeUntil: string): string {
+  const [, m, d] = freeUntil.split("-");
+  return `${parseInt(m)}/${parseInt(d)}まで無料`;
+}
+
+/** Is this volume downloadable considering free expiry? */
+function isDownloadable(vol: { status: string; availabilityReason: string | null; freeUntil: string | null }): boolean {
+  if (vol.status === "done" || vol.status === "error") return true;
+  if (vol.status !== "available") return false;
+  // If reason is "free", check expiry
+  if (vol.availabilityReason === "free" && isFreeExpired(vol.freeUntil)) return false;
+  return true;
+}
+
 function getExternalUrl(pluginId: string, titleId: string): string | null {
   switch (pluginId) {
     case "cmoa":
@@ -109,13 +133,14 @@ function formatDate(dateStr: string) {
 }
 
 export default function TitleDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, autoSync } = useLocalSearchParams<{ id: string; autoSync?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -164,6 +189,15 @@ export default function TitleDetailScreen() {
     },
     onError: (err: Error) => toast.error("エラー", { description: err.message }),
   });
+
+  // Auto-sync when navigated from library add
+  const autoSyncFired = useRef(false);
+  useEffect(() => {
+    if (autoSync === "true" && !autoSyncFired.current && title && accountId !== undefined) {
+      autoSyncFired.current = true;
+      syncMutation.mutate(undefined);
+    }
+  }, [autoSync, title, accountId]);
 
   const downloadMutation = useMutation({
     mutationFn: (vols: number[] | "available" | "all" | "error") =>
@@ -291,7 +325,9 @@ export default function TitleDetailScreen() {
         <View style={styles.titleSection}>
           <View style={styles.titleRow}>
             {title.coverUrl && (
-              <Image source={{ uri: title.coverUrl }} style={styles.coverImage} />
+              <TouchableOpacity onPress={() => setPreviewImage(title.coverUrl!)} activeOpacity={0.8}>
+                <Image source={{ uri: title.coverUrl }} style={styles.coverImage} />
+              </TouchableOpacity>
             )}
             <View style={styles.titleInfo}>
               <View style={styles.titleTextRow}>
@@ -347,7 +383,7 @@ export default function TitleDetailScreen() {
                       }}
                       hitSlop={8}
                     >
-                      <Ionicons name="pencil" size={14} color="#64748b" />
+                      <Ionicons name="pencil" size={16} color="#94a3b8" />
                     </TouchableOpacity>
                   </>
                 )}
@@ -371,6 +407,14 @@ export default function TitleDetailScreen() {
                 >
                   <Ionicons name="open-outline" size={13} color="#60a5fa" />
                 </TouchableOpacity>
+                {isStandalone && saVol && (
+                  <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg }]}>
+                    <Ionicons name={saCfg.icon} size={10} color={saCfg.fg} />
+                    <Text style={[styles.listStatusText, { color: saCfg.fg }]}>
+                      {saCfg.label}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.titleActions}>
@@ -407,9 +451,9 @@ export default function TitleDetailScreen() {
         </View>
 
         {/* Genre tags (shown for both standalone and series) */}
-        {title.genres.length > 0 && (
+        {((title.displayGenres ?? title.genres).length > 0) && (
           <View style={styles.saTagRow}>
-            {title.genres.map((tag) => (
+            {(title.displayGenres ?? title.genres).map((tag) => (
               <View key={tag} style={styles.saTag}>
                 <Text style={styles.saTagText}>{tag}</Text>
               </View>
@@ -421,16 +465,13 @@ export default function TitleDetailScreen() {
         {isStandalone && saVol && (
           <>
 
+            {(saIsActive || saVol.status === "done" || saVol.status === "downloading") && (
             <View style={styles.saStatusCard}>
-              <View style={styles.saStatusRow}>
-                <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg }]}>
-                  <Ionicons name={saCfg.icon} size={12} color={saCfg.fg} />
-                  <Text style={[styles.listStatusText, { color: saCfg.fg, fontSize: 12 }]}>
-                    {saCfg.label}
-                  </Text>
+              {saIsActive && (
+                <View style={styles.saStatusRow}>
+                  <ActivityIndicator color="#fb923c" size="small" />
                 </View>
-                {saIsActive && <ActivityIndicator color="#fb923c" size="small" />}
-              </View>
+              )}
 
               {saVol.status === "downloading" && saVol.jobProgress != null && saVol.jobProgress > 0 && (
                 <View style={styles.volProgressRow}>
@@ -463,6 +504,7 @@ export default function TitleDetailScreen() {
                 <Text style={styles.saMetaItem}>{saVol.pageCount}ページ</Text>
               )}
             </View>
+            )}
 
             <View style={styles.saActions}>
               {(saVol.status === "available" || saVol.status === "done") && (
@@ -587,7 +629,9 @@ export default function TitleDetailScreen() {
 
               {/* Thumbnail */}
               {vol.thumbnailUrl ? (
-                <Image source={{ uri: vol.thumbnailUrl }} style={styles.listThumb} />
+                <TouchableOpacity onPress={() => setPreviewImage(vol.thumbnailUrl!)} activeOpacity={0.8}>
+                  <Image source={{ uri: vol.thumbnailUrl }} style={styles.listThumb} />
+                </TouchableOpacity>
               ) : (
                 <View style={[styles.listThumbFallback, { backgroundColor: cfg.bg }]}>
                   <Text style={[styles.listThumbNum, { color: cfg.fg }]}>
@@ -649,8 +693,14 @@ export default function TitleDetailScreen() {
                     </Text>
                   )}
                   {vol.availabilityReason && vol.status !== "done" && (
-                    <Text style={styles.listMetaReason} numberOfLines={1}>
-                      {REASON_LABELS[vol.availabilityReason] ?? vol.availabilityReason}
+                    <Text style={[
+                      styles.listMetaReason,
+                      vol.availabilityReason === "free" && !isFreeExpired(vol.freeUntil) && styles.listMetaFree,
+                      vol.availabilityReason === "free" && isFreeExpired(vol.freeUntil) && styles.listMetaExpired,
+                    ]} numberOfLines={1}>
+                      {vol.availabilityReason === "free" && vol.freeUntil
+                        ? (isFreeExpired(vol.freeUntil) ? `無料期間終了 (${formatFreeUntil(vol.freeUntil)})` : formatFreeUntil(vol.freeUntil))
+                        : (REASON_LABELS[vol.availabilityReason] ?? vol.availabilityReason)}
                     </Text>
                   )}
                 </View>
@@ -671,10 +721,32 @@ export default function TitleDetailScreen() {
 
       </ScrollView>
 
+      {/* Image preview modal */}
+      <Modal
+        visible={!!previewImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewImage(null)}
+      >
+        <TouchableOpacity
+          style={styles.previewOverlay}
+          activeOpacity={1}
+          onPress={() => setPreviewImage(null)}
+        >
+          {previewImage && (
+            <Image
+              source={{ uri: previewImage }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          )}
+        </TouchableOpacity>
+      </Modal>
+
       {/* Floating selection bar */}
       {!isStandalone && selected.size > 0 && (() => {
         const selectedVols = volumes.filter((v) => selected.has(v.volumeNum));
-        const downloadable = selectedVols.filter((v) => v.status === "available" || v.status === "done" || v.status === "error");
+        const downloadable = selectedVols.filter((v) => isDownloadable(v));
         const retryable = selectedVols.filter((v) => v.status === "error");
         const deletable = selectedVols.filter((v) => v.status === "done");
         const isBusy = syncMutation.isPending || downloadMutation.isPending || deleteVolumesMutation.isPending;
@@ -948,6 +1020,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     flex: 1,
   },
+  listMetaFree: {
+    color: "#4ade80",
+  },
+  listMetaExpired: {
+    color: "#f87171",
+  },
 
   // Volume progress
   volProgressRow: {
@@ -1074,6 +1152,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 6,
     marginTop: 10,
+    marginBottom: 6,
   },
   saTag: {
     backgroundColor: "#1e293b",
@@ -1107,6 +1186,18 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 12,
   },
+  // Image preview modal
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewImage: {
+    width: "45%",
+    height: "40%",
+  },
+
   saActions: {
     flexDirection: "row",
     alignItems: "center",

@@ -76,6 +76,8 @@ export interface VolumeAvailability {
   available: boolean;
   /** "purchased", "free", "subscription", "not_purchased", "unknown" */
   reason: string;
+  /** Raw ViewMode from the content API (plugin-specific) */
+  viewMode?: number;
 }
 
 export interface AvailabilityChecker {
@@ -110,6 +112,8 @@ export interface VolumeInfo {
   contentKey: string;
   detailUrl?: string;
   thumbnailUrl?: string;
+  /** ISO date string — free campaign expiry (e.g. "2026-03-31") */
+  freeUntil?: string;
 }
 
 export interface MetadataProvider {
