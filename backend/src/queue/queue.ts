@@ -1,5 +1,5 @@
 import { db, schema } from "../db/index.js";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
 
 export interface QueuedJob {
   id: number;
@@ -9,6 +9,7 @@ export interface QueuedJob {
   status: string;
   priority: number;
   progress: number;
+  retryCount: number;
   message: string | null;
   error: string | null;
 }
@@ -143,24 +144,66 @@ export class JobQueue {
   }
 
   /**
-   * Cancel a pending job.
+   * Cancel a pending or running job.
    */
   async cancel(jobId: number): Promise<boolean> {
-    const result = db
-      .update(schema.jobs)
+    const job = db
+      .select()
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, jobId))
+      .get();
+
+    if (!job || (job.status !== "pending" && job.status !== "running")) {
+      return false;
+    }
+
+    db.update(schema.jobs)
       .set({
         status: "cancelled",
         finishedAt: new Date().toISOString(),
       })
-      .where(
-        and(
-          eq(schema.jobs.id, jobId),
-          eq(schema.jobs.status, "pending")
-        )
-      )
+      .where(eq(schema.jobs.id, jobId))
       .run();
 
-    return result.changes > 0;
+    if (job.volumeId) {
+      db.update(schema.volumes)
+        .set({ status: "cancelled" })
+        .where(eq(schema.volumes.id, job.volumeId))
+        .run();
+    }
+
+    return true;
+  }
+
+  /**
+   * Retry a failed job: reset to pending and increment retryCount.
+   */
+  async retry(jobId: number): Promise<void> {
+    db.update(schema.jobs)
+      .set({
+        status: "pending",
+        progress: 0,
+        error: null,
+        message: null,
+        startedAt: null,
+        finishedAt: null,
+        retryCount: sql`${schema.jobs.retryCount} + 1`,
+      })
+      .where(eq(schema.jobs.id, jobId))
+      .run();
+
+    const job = db
+      .select({ volumeId: schema.jobs.volumeId })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, jobId))
+      .get();
+
+    if (job?.volumeId) {
+      db.update(schema.volumes)
+        .set({ status: "queued" })
+        .where(eq(schema.volumes.id, job.volumeId))
+        .run();
+    }
   }
 
   /**

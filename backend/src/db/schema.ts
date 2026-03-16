@@ -26,6 +26,7 @@ export const library = sqliteTable(
     metadata: text("metadata"), // JSON (plugin-specific)
     createdAt: text("created_at").default(sql`(datetime('now'))`),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+    lastAccessedAt: text("last_accessed_at").default(sql`(datetime('now'))`),
   },
   (table) => [
     uniqueIndex("library_plugin_title_idx").on(table.pluginId, table.titleId),
@@ -39,7 +40,7 @@ export const volumes = sqliteTable(
     libraryId: integer("library_id").references(() => library.id, { onDelete: "cascade" }),
     volumeNum: integer("volume_num").notNull(),
     status: text("status", {
-      enum: ["unknown", "available", "unavailable", "queued", "downloading", "done", "error"],
+      enum: ["unknown", "available", "unavailable", "queued", "downloading", "done", "error", "cancelled"],
     }).default("unknown"),
     /** "purchased", "free", "subscription", "not_purchased", "unknown" */
     availabilityReason: text("availability_reason"),
@@ -66,6 +67,7 @@ export const jobs = sqliteTable("jobs", {
   }).default("pending"),
   priority: integer("priority").default(0),
   progress: real("progress").default(0),
+  retryCount: integer("retry_count").default(0),
   message: text("message"),
   error: text("error"),
   startedAt: text("started_at"),

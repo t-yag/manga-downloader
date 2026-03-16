@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { db, schema } from "../../db/index.js";
-import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { eq, desc, asc, and, inArray, like, sql, or } from "drizzle-orm";
 import { registry } from "../../plugins/registry.js";
 import { jobQueue } from "../../queue/queue.js";
 import { logger } from "../../logger.js";
@@ -39,17 +39,74 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
   /**
    * GET /api/library
-   * List all titles in library.
+   * List titles in library with optional filtering, sorting, and pagination.
+   *
+   * Query params:
+   *   search    - partial match on title or author
+   *   pluginId  - filter by plugin
+   *   sort      - lastAccessedAt (default) | createdAt | title
+   *   order     - desc (default) | asc
+   *   limit     - page size (default 50)
+   *   offset    - pagination offset (default 0)
    */
-  app.get("/api/library", async () => {
+  app.get("/api/library", async (request) => {
+    const query = request.query as {
+      search?: string;
+      pluginId?: string;
+      sort?: string;
+      order?: string;
+      limit?: string;
+      offset?: string;
+    };
+
+    const conditions = [];
+    if (query.search) {
+      const pattern = `%${query.search}%`;
+      conditions.push(
+        or(
+          like(schema.library.title, pattern),
+          like(schema.library.author, pattern),
+        )
+      );
+    }
+    if (query.pluginId) {
+      conditions.push(eq(schema.library.pluginId, query.pluginId));
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Sort
+    const sortCol = query.sort === "createdAt"
+      ? schema.library.createdAt
+      : query.sort === "title"
+        ? schema.library.title
+        : schema.library.lastAccessedAt;
+    const orderFn = query.order === "asc" ? asc : desc;
+    // For title sort, default to asc
+    const orderDir = query.sort === "title" && !query.order ? asc : orderFn;
+
+    // Pagination
+    const limit = Math.min(Number(query.limit) || 50, 200);
+    const offset = Number(query.offset) || 0;
+
+    // Total count
+    const [{ count: total }] = db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.library)
+      .where(where)
+      .all();
+
     const titles = db
       .select()
       .from(schema.library)
-      .orderBy(desc(schema.library.updatedAt))
+      .where(where)
+      .orderBy(orderDir(sortCol))
+      .limit(limit)
+      .offset(offset)
       .all();
 
     // Attach volume summary for each title
-    return titles.map((t) => {
+    const items = titles.map((t) => {
       const vols = db
         .select()
         .from(schema.volumes)
@@ -63,12 +120,16 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         unknown: vols.filter((v) => v.status === "unknown").length,
       };
 
+      const plugin = registry.get(t.pluginId);
       return {
         ...t,
+        contentType: plugin?.manifest.contentType ?? "series",
         genres: t.genres ? JSON.parse(t.genres) : [],
         volumeSummary: summary,
       };
     });
+
+    return { items, total };
   });
 
   /**
@@ -135,12 +196,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         .get();
 
       // Create volume entries
+      // Plugins without availabilityChecker (e.g. standalone/no-auth) are always available
+      const initialStatus = plugin.availabilityChecker ? "unknown" : "available";
       for (const vol of titleInfo.volumes) {
         db.insert(schema.volumes)
           .values({
             libraryId: result.id,
             volumeNum: vol.volume,
-            status: "unknown",
+            status: initialStatus,
             thumbnailUrl: vol.thumbnailUrl,
             metadata: JSON.stringify({
               readerUrl: vol.readerUrl,
@@ -178,19 +241,60 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
     if (!title) return reply.status(404).send({ error: "Title not found" });
 
+    // Update last accessed timestamp
+    db.update(schema.library)
+      .set({ lastAccessedAt: new Date().toISOString() })
+      .where(eq(schema.library.id, title.id))
+      .run();
+
+    const plugin = registry.get(title.pluginId);
     const vols = db
       .select()
       .from(schema.volumes)
       .where(eq(schema.volumes.libraryId, title.id))
       .all();
 
+    // Enrich active volumes with job progress
+    const activeVolIds = vols
+      .filter((v) => v.status === "queued" || v.status === "downloading")
+      .map((v) => v.id);
+
+    const jobsByVolId = new Map<number, { progress: number; message: string | null }>();
+    if (activeVolIds.length > 0) {
+      const activeJobs = db
+        .select({
+          volumeId: schema.jobs.volumeId,
+          progress: schema.jobs.progress,
+          message: schema.jobs.message,
+        })
+        .from(schema.jobs)
+        .where(
+          and(
+            inArray(schema.jobs.volumeId, activeVolIds),
+            inArray(schema.jobs.status, ["pending", "running"]),
+          )
+        )
+        .all();
+      for (const j of activeJobs) {
+        if (j.volumeId != null) {
+          jobsByVolId.set(j.volumeId!, { progress: j.progress ?? 0, message: j.message });
+        }
+      }
+    }
+
     return {
       ...title,
+      contentType: plugin?.manifest.contentType ?? "series",
       genres: title.genres ? JSON.parse(title.genres) : [],
-      volumes: vols.map((v) => ({
-        ...v,
-        metadata: v.metadata ? JSON.parse(v.metadata) : null,
-      })),
+      volumes: vols.map((v) => {
+        const job = jobsByVolId.get(v.id);
+        return {
+          ...v,
+          metadata: v.metadata ? JSON.parse(v.metadata) : null,
+          jobProgress: job?.progress ?? null,
+          jobMessage: job?.message ?? null,
+        };
+      }),
     };
   });
 
@@ -222,6 +326,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         .set({
           title: titleInfo.seriesTitle,
           author: titleInfo.author,
+          genres: JSON.stringify(titleInfo.genres),
           totalVolumes: titleInfo.totalVolumes,
           coverUrl: titleInfo.coverUrl,
           updatedAt: new Date().toISOString(),
@@ -244,11 +349,12 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           .get();
 
         if (!existing) {
+          const volStatus = plugin.availabilityChecker ? "unknown" : "available";
           db.insert(schema.volumes)
             .values({
               libraryId: title.id,
               volumeNum: vol.volume,
-              status: "unknown",
+              status: volStatus,
               thumbnailUrl: vol.thumbnailUrl,
               metadata: JSON.stringify({
                 readerUrl: vol.readerUrl,
@@ -499,12 +605,48 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: "Plugin does not support metadata" });
     }
 
-    const titleInfo = await plugin.metadata.getTitleInfo(title.titleId);
+    // For standalone (no availabilityChecker): getTitleInfo success/failure determines availability
+    const isStandalone = !plugin.availabilityChecker;
+
+    let titleInfo;
+    try {
+      titleInfo = await plugin.metadata.getTitleInfo(title.titleId);
+    } catch (error) {
+      if (isStandalone) {
+        // Source unreachable → mark "available" volumes as "unavailable"
+        const now = new Date().toISOString();
+        const updated = db
+          .select()
+          .from(schema.volumes)
+          .where(eq(schema.volumes.libraryId, title.id))
+          .all()
+          .filter((v) => v.status === "available");
+
+        for (const vol of updated) {
+          db.update(schema.volumes)
+            .set({ status: "unavailable", checkedAt: now })
+            .where(eq(schema.volumes.id, vol.id))
+            .run();
+        }
+
+        const msg = error instanceof Error ? error.message : String(error);
+        log.warn(`Standalone sync failed for titleId=${title.titleId}: ${msg}`);
+        return {
+          message: "ソースにアクセスできません",
+          newVolumes: 0,
+          totalVolumes: null,
+          checkedVolumes: updated.length,
+          availableCount: 0,
+        };
+      }
+      throw error;
+    }
 
     db.update(schema.library)
       .set({
         title: titleInfo.seriesTitle,
         author: titleInfo.author,
+        genres: JSON.stringify(titleInfo.genres),
         totalVolumes: titleInfo.totalVolumes,
         coverUrl: titleInfo.coverUrl,
         updatedAt: new Date().toISOString(),
@@ -526,11 +668,12 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         .get();
 
       if (!existing) {
+        const volStatus = isStandalone ? "available" : "unknown";
         db.insert(schema.volumes)
           .values({
             libraryId: title.id,
             volumeNum: vol.volume,
-            status: "unknown",
+            status: volStatus,
             thumbnailUrl: vol.thumbnailUrl,
             metadata: JSON.stringify({
               readerUrl: vol.readerUrl,
@@ -548,7 +691,33 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Check availability for unknown volumes only
+    // Standalone: getTitleInfo succeeded → restore any "unavailable" back to "available"
+    if (isStandalone) {
+      const now = new Date().toISOString();
+      const unavailableVols = db
+        .select()
+        .from(schema.volumes)
+        .where(eq(schema.volumes.libraryId, title.id))
+        .all()
+        .filter((v) => v.status === "unavailable");
+
+      for (const vol of unavailableVols) {
+        db.update(schema.volumes)
+          .set({ status: "available", checkedAt: now })
+          .where(eq(schema.volumes.id, vol.id))
+          .run();
+      }
+
+      return {
+        message: "Sync complete",
+        newVolumes,
+        totalVolumes: titleInfo.totalVolumes,
+        checkedVolumes: unavailableVols.length,
+        availableCount: unavailableVols.length,
+      };
+    }
+
+    // Series: check availability for unknown volumes
     let availabilityResults: { volume: number; available: boolean; reason: string }[] = [];
     const unknownVols = db
       .select()
@@ -581,7 +750,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/library/:id/download", async (request, reply) => {
     const { id } = request.params as { id: string };
     const { volumes: volumeNums, accountId } = request.body as {
-      volumes: number[] | "available" | "all";
+      volumes: number[] | "available" | "all" | "error";
       accountId?: number;
     };
 
@@ -607,15 +776,17 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     let targetVols: typeof allVols;
     if (volumeNums === "available") {
       targetVols = allVols.filter((v) => v.status === "available");
+    } else if (volumeNums === "error") {
+      targetVols = allVols.filter((v) => v.status === "error");
     } else if (volumeNums === "all") {
       targetVols = allVols.filter((v) => v.status !== "done" && v.status !== "queued" && v.status !== "downloading");
     } else {
       targetVols = allVols.filter((v) => volumeNums.includes(v.volumeNum));
     }
 
-    // Filter out already downloaded/in-progress
+    // Filter out in-progress volumes (allow re-download of "done" volumes)
     targetVols = targetVols.filter(
-      (v) => v.status !== "done" && v.status !== "queued" && v.status !== "downloading"
+      (v) => v.status !== "queued" && v.status !== "downloading"
     );
 
     if (targetVols.length === 0) {

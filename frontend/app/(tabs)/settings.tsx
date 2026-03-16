@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { toast } from "sonner-native";
+import { toast } from "../../src/toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getSettings,
@@ -35,10 +35,20 @@ export default function SettingsScreen() {
   const [newAccEmail, setNewAccEmail] = useState("");
   const [newAccPassword, setNewAccPassword] = useState("");
 
+  const [basePath, setBasePath] = useState("");
+  const [pathTemplate, setPathTemplate] = useState("");
+
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
   });
+
+  useEffect(() => {
+    if (settings) {
+      setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{plugin}/{title}/vol_{volume}");
+    }
+  }, [settings]);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["accounts"],
@@ -67,6 +77,21 @@ export default function SettingsScreen() {
   useEffect(() => {
     testConnection();
   }, []);
+
+  const updateDownloadSettingsMutation = useMutation({
+    mutationFn: () =>
+      updateSettings({
+        "download.basePath": basePath,
+        "download.pathTemplate": pathTemplate,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("ダウンロード設定を保存しました。");
+    },
+    onError: (err: Error) => {
+      toast.error("エラー", { description: err.message });
+    },
+  });
 
   const addAccountMutation = useMutation({
     mutationFn: (pluginId: string) =>
@@ -154,6 +179,53 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Download Settings */}
+      <View style={styles.sectionHeaderRow}>
+        <Ionicons name="download-outline" size={16} color="#94a3b8" />
+        <Text style={styles.sectionLabel}>ダウンロード設定</Text>
+      </View>
+      <View style={styles.section}>
+        <Text style={[styles.fieldLabel, { marginTop: 0 }]}>ベースディレクトリ</Text>
+        <TextInput
+          style={styles.input}
+          value={basePath}
+          onChangeText={setBasePath}
+          placeholder="./data/downloads"
+          placeholderTextColor="#64748b"
+          autoCapitalize="none"
+        />
+        <Text style={styles.fieldLabel}>パステンプレート</Text>
+        <TextInput
+          style={styles.input}
+          value={pathTemplate}
+          onChangeText={setPathTemplate}
+          placeholder="{plugin}/{title}/vol_{volume}"
+          placeholderTextColor="#64748b"
+          autoCapitalize="none"
+        />
+        <Text style={styles.templateHint}>
+          {"変数: {plugin} {title} {volume} {author}"}
+        </Text>
+        <Text style={styles.templatePreview}>
+          例: {basePath}/{pathTemplate
+            .replace(/\{plugin\}/g, "cmoa")
+            .replace(/\{title\}/g, "タイトル名")
+            .replace(/\{volume\}/g, "001")
+            .replace(/\{author\}/g, "著者名")}.zip
+        </Text>
+        <TouchableOpacity
+          style={[styles.btn, { marginTop: 4 }]}
+          onPress={() => updateDownloadSettingsMutation.mutate()}
+          disabled={updateDownloadSettingsMutation.isPending}
+        >
+          {updateDownloadSettingsMutation.isPending ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.btnText}>保存</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Plugins */}
       <View style={styles.sectionHeaderRow}>
         <Ionicons name="extension-puzzle-outline" size={16} color="#94a3b8" />
@@ -181,7 +253,39 @@ export default function SettingsScreen() {
                 ]}
               >
                 {/* Plugin header */}
-                <Text style={styles.pluginName}>{p.name}</Text>
+                <View style={styles.pluginHeader}>
+                  <Text style={styles.pluginName}>{p.name}</Text>
+                  <View
+                    style={[
+                      styles.contentTypeBadge,
+                      p.contentType === "series"
+                        ? styles.contentTypeSeries
+                        : styles.contentTypeStandalone,
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        p.contentType === "series"
+                          ? "library-outline"
+                          : "document-outline"
+                      }
+                      size={11}
+                      color={
+                        p.contentType === "series" ? "#a78bfa" : "#fbbf24"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.contentTypeBadgeText,
+                        p.contentType === "series"
+                          ? styles.contentTypeSeriesText
+                          : styles.contentTypeStandaloneText,
+                      ]}
+                    >
+                      {p.contentType === "series" ? "シリーズ" : "単巻"}
+                    </Text>
+                  </View>
+                </View>
 
                 {/* Account status for auth plugins */}
                 {needsAuth && pluginAccount && !isExpanded && (
@@ -362,7 +466,25 @@ const styles = StyleSheet.create({
     borderBottomColor: "#334155",
   },
   lastRow: { borderBottomWidth: 0, paddingBottom: 0 },
+  pluginHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   pluginName: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  contentTypeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  contentTypeSeries: { backgroundColor: "#2e1065" },
+  contentTypeStandalone: { backgroundColor: "#422006" },
+  contentTypeBadgeText: { fontSize: 11, fontWeight: "600" },
+  contentTypeSeriesText: { color: "#a78bfa" },
+  contentTypeStandaloneText: { color: "#fbbf24" },
 
   // Plugin account
   pluginAccountRow: {
@@ -404,4 +526,11 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { color: "#94a3b8", fontSize: 14, fontWeight: "600" },
   noAuthHint: { color: "#64748b", fontSize: 12, marginTop: 6 },
+  templateHint: { color: "#64748b", fontSize: 12, marginBottom: 4 },
+  templatePreview: {
+    color: "#475569",
+    fontSize: 12,
+    marginBottom: 8,
+    fontFamily: "monospace" as any,
+  },
 });

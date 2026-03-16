@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
+    "archiver": "^7.0.1",
     "axios": "^1.13.2",
     "better-sqlite3": "^11.9.1",
     "cheerio": "^1.1.2",
@@ -22,11 +23,21 @@
     "sharp": "^0.33.2",
     "zod": "^3.25.23"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "puppeteer",
+      "sharp"
+    ]
+  },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.15.0",
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
-  }
+  },
+  "packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be"
 }

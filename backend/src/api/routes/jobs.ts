@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db, schema } from "../../db/index.js";
 import { eq, desc } from "drizzle-orm";
 import { jobQueue } from "../../queue/queue.js";
+import { worker } from "../../queue/worker.js";
 import { registry } from "../../plugins/registry.js";
 
 export async function jobRoutes(app: FastifyInstance): Promise<void> {
@@ -167,13 +168,22 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return { jobIds, message: `${jobIds.length} job(s) queued` };
   });
 
-  // Cancel job
+  // Cancel job (pending or running)
   app.delete("/api/jobs/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const cancelled = await jobQueue.cancel(Number(id));
+    const jobId = Number(id);
 
+    // If running, signal worker to abort first
+    const aborted = await worker.cancelRunningJob(jobId);
+    if (aborted) {
+      // Worker handles DB update and file cleanup asynchronously
+      return { message: "Job cancellation requested" };
+    }
+
+    // Otherwise try cancelling a pending job
+    const cancelled = await jobQueue.cancel(jobId);
     if (!cancelled) {
-      return reply.status(400).send({ error: "Job cannot be cancelled (may already be running or finished)" });
+      return reply.status(400).send({ error: "Job cannot be cancelled (may already be finished)" });
     }
 
     return { message: "Job cancelled" };

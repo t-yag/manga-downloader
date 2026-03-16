@@ -10,7 +10,7 @@ import {
   RefreshControl,
   Platform,
 } from "react-native";
-import { toast } from "sonner-native";
+import { toast } from "../../../src/toast";
 import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -73,20 +73,23 @@ export default function JobsScreen() {
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
   const [filter, setFilter] = useState<StatusFilter>("all");
-  const [allJobs, setAllJobs] = useState<Job[]>([]);
+  const [extraJobs, setExtraJobs] = useState<Job[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const loadingMore = useRef(false);
 
-  const { isLoading, refetch } = useQuery({
+  const { data: firstPage = [], isLoading, refetch } = useQuery({
     queryKey: ["jobs"],
     queryFn: () => getJobs({ limit: PAGE_SIZE, offset: 0 }),
     staleTime: 0,
     refetchInterval: isFocused ? 3000 : false,
-    onSuccess: (data) => {
-      setAllJobs(data);
-      setHasMore(data.length >= PAGE_SIZE);
-    },
   });
+
+  const allJobs = hasMore && extraJobs.length > 0
+    ? (() => {
+        const ids = new Set(firstPage.map((j) => j.id));
+        return [...firstPage, ...extraJobs.filter((j) => !ids.has(j.id))];
+      })()
+    : firstPage;
 
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
@@ -102,7 +105,7 @@ export default function JobsScreen() {
       const more = await getJobs({ limit: PAGE_SIZE, offset: allJobs.length });
       if (more.length < PAGE_SIZE) setHasMore(false);
       if (more.length > 0) {
-        setAllJobs((prev) => {
+        setExtraJobs((prev) => {
           const ids = new Set(prev.map((j) => j.id));
           return [...prev, ...more.filter((j) => !ids.has(j.id))];
         });
@@ -155,12 +158,18 @@ export default function JobsScreen() {
             </View>
             <Text style={styles.rowTime}>{formatTime(item.createdAt)}</Text>
           </View>
-          {isRunning && (
+          {isRunning && progressPct > 0 && (
             <View style={styles.progressRow}>
               <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
               </View>
               <Text style={styles.progressText}>{progressPct}%</Text>
+            </View>
+          )}
+          {isRunning && progressPct === 0 && item.message && /^\d+$/.test(item.message) && (
+            <View style={styles.pageCountRow}>
+              <Ionicons name="documents-outline" size={12} color="#60a5fa" />
+              <Text style={styles.pageCountText}>{item.message}ページ DL済</Text>
             </View>
           )}
           {item.error && (
@@ -172,12 +181,16 @@ export default function JobsScreen() {
             </Text>
           )}
         </View>
-        {isPending && (
+        {(isPending || isRunning) && (
           <TouchableOpacity
             style={styles.cancelBtn}
             onPress={() =>
-              confirmAction("キャンセル", "このジョブをキャンセルしますか？", () =>
-                cancelMutation.mutate(item.id)
+              confirmAction(
+                "キャンセル",
+                isRunning
+                  ? "実行中のジョブをキャンセルしますか？\nダウンロード済みのファイルは削除されます。"
+                  : "このジョブをキャンセルしますか？",
+                () => cancelMutation.mutate(item.id)
               )
             }
           >
@@ -384,6 +397,13 @@ const styles = StyleSheet.create({
   },
 
   // Sub-info
+  pageCountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 3,
+  },
+  pageCountText: { color: "#60a5fa", fontSize: 11, fontWeight: "600" },
   durationText: { color: "#64748b", fontSize: 11, marginTop: 2 },
   errorText: { color: "#f87171", fontSize: 11, marginTop: 2 },
 

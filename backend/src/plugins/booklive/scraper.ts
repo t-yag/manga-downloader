@@ -37,6 +37,8 @@ export class BookLiveScraper implements MetadataProvider {
       // Generate volume information
       const volumes = this.generateVolumeInfos(titleId, totalVolumes);
 
+      const coverUrl = BookLiveScraper.generateCoverUrl(titleId);
+
       return {
         titleId,
         title,
@@ -44,6 +46,7 @@ export class BookLiveScraper implements MetadataProvider {
         author,
         genres,
         totalVolumes,
+        coverUrl,
         volumes,
       };
     } catch (error: any) {
@@ -134,7 +137,8 @@ export class BookLiveScraper implements MetadataProvider {
 
   private extractGenres($: cheerio.CheerioAPI): string[] {
     const genres: string[] = [];
-    $('a[href*="/genre/"]').each((i, el) => {
+
+    $(".tags_area a").each((_, el) => {
       const genre = $(el).text().trim();
       if (genre && !genres.includes(genre)) {
         genres.push(genre);
@@ -154,10 +158,28 @@ export class BookLiveScraper implements MetadataProvider {
         readerUrl: urlInfo.readerUrl,
         contentKey: urlInfo.cid,
         detailUrl: urlInfo.detailUrl,
+        thumbnailUrl: BookLiveScraper.generateThumbnailUrl(titleId, volNum),
       });
     }
 
     return volumes;
+  }
+
+  /**
+   * Generate cover URL for a series (1巻の大きいサムネイル).
+   * Pattern: https://res.booklive.jp/{titleId}/001/thumbnail/2L.jpg
+   */
+  static generateCoverUrl(titleId: string): string {
+    return `https://res.booklive.jp/${titleId}/001/thumbnail/2L.jpg`;
+  }
+
+  /**
+   * Generate thumbnail URL for a specific volume.
+   * Pattern: https://res.booklive.jp/{titleId}/{volume(3桁)}/thumbnail/M.jpg
+   */
+  static generateThumbnailUrl(titleId: string, volume: number): string {
+    const paddedVol = String(volume).padStart(3, "0");
+    return `https://res.booklive.jp/${titleId}/${paddedVol}/thumbnail/M.jpg`;
   }
 
   /**

@@ -63,6 +63,7 @@ export interface LibraryTitle {
   titleId: string;
   title: string;
   author: string | null;
+  contentType: "series" | "standalone";
   totalVolumes: number | null;
   coverUrl: string | null;
   genres: string[];
@@ -86,14 +87,38 @@ export interface Volume {
   downloadedAt: string | null;
   checkedAt: string | null;
   metadata: Record<string, unknown> | null;
+  jobProgress: number | null;
+  jobMessage: string | null;
 }
 
 export interface LibraryDetail extends Omit<LibraryTitle, "volumeSummary"> {
   volumes: Volume[];
 }
 
-export function getLibrary() {
-  return request<LibraryTitle[]>("/api/library");
+export interface LibraryQuery {
+  search?: string;
+  pluginId?: string;
+  sort?: "lastAccessedAt" | "createdAt" | "title";
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export interface LibraryResponse {
+  items: LibraryTitle[];
+  total: number;
+}
+
+export function getLibrary(params?: LibraryQuery) {
+  const q = new URLSearchParams();
+  if (params?.search) q.set("search", params.search);
+  if (params?.pluginId) q.set("pluginId", params.pluginId);
+  if (params?.sort) q.set("sort", params.sort);
+  if (params?.order) q.set("order", params.order);
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.offset != null) q.set("offset", String(params.offset));
+  const qs = q.toString();
+  return request<LibraryResponse>(`/api/library${qs ? `?${qs}` : ""}`);
 }
 
 export function getLibraryTitle(id: number) {
@@ -146,7 +171,7 @@ export function syncTitle(id: number, accountId?: number, volumes?: number[]) {
   );
 }
 
-export function downloadVolumes(id: number, volumes: number[] | "available" | "all", accountId?: number) {
+export function downloadVolumes(id: number, volumes: number[] | "available" | "all" | "error", accountId?: number) {
   return request<{ message: string; jobIds: number[]; volumes: number[] }>(
     `/api/library/${id}/download`,
     { method: "POST", body: JSON.stringify({ volumes, accountId }) }
@@ -192,6 +217,7 @@ export interface PluginInfo {
   id: string;
   name: string;
   version: string;
+  contentType: "series" | "standalone";
   supportedFeatures: Record<string, boolean>;
 }
 

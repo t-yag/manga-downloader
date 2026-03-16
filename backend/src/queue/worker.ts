@@ -4,16 +4,25 @@ import { jobQueue, type QueuedJob } from "./queue.js";
 import { registry } from "../plugins/registry.js";
 import type { DownloadJob, SessionData } from "../plugins/base.js";
 import { getSettingValue } from "../api/routes/settings.js";
+import { resolveOutputPath, zipAndCleanup, removeOldDownload } from "../storage/index.js";
 import { logger } from "../logger.js";
 import path from "path";
+import fs from "fs/promises";
 
 const log = logger.child({ module: "Worker" });
 
 const DEFAULT_POLL_INTERVAL = 5000; // 5 seconds
 
+interface RunningJob {
+  abortController: AbortController;
+  outputDir: string;
+  zipPath: string;
+}
+
 export class Worker {
   private running = false;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private runningJobs = new Map<number, RunningJob>();
 
   start(): void {
     if (this.running) return;
@@ -30,6 +39,19 @@ export class Worker {
       this.timer = null;
     }
     log.info("Stopped");
+  }
+
+  /**
+   * Cancel a running job: abort the download, clean up partial files, update DB.
+   */
+  async cancelRunningJob(jobId: number): Promise<boolean> {
+    const entry = this.runningJobs.get(jobId);
+    if (!entry) return false;
+
+    log.info(`Cancelling running job #${jobId}`);
+    entry.abortController.abort();
+    // Cleanup and DB update happen in processJob's finally/catch block
+    return true;
   }
 
   private async poll(): Promise<void> {
@@ -81,10 +103,17 @@ export class Worker {
 
     // Build download job
     const volumeMeta = volumeData.metadata ? JSON.parse(volumeData.metadata) : {};
-    const basePath = getSettingValue<string>("download.basePath") ?? path.join(process.cwd(), "data", "downloads");
-    const titleDir = libraryData.title.replace(/[<>:"\/\\|?*]/g, "_").substring(0, 100);
-    const volDir = `vol_${String(volumeData.volumeNum).padStart(3, "0")}`;
-    const outputDir = path.join(basePath, queuedJob.pluginId, titleDir, volDir);
+    const { outputDir, zipPath } = resolveOutputPath({
+      plugin: queuedJob.pluginId,
+      title: libraryData.title,
+      volume: volumeData.volumeNum,
+      author: libraryData.author ?? undefined,
+    });
+
+    // Remove old download if path has changed (e.g. template was updated)
+    if (volumeData.filePath && volumeData.filePath !== zipPath) {
+      await removeOldDownload(volumeData.filePath);
+    }
 
     const downloadJob: DownloadJob = {
       jobId: queuedJob.id,
@@ -136,31 +165,41 @@ export class Worker {
       }
     }
 
+    const abortController = new AbortController();
+    this.runningJobs.set(queuedJob.id, { abortController, outputDir, zipPath });
+
     try {
       const generator = plugin.downloader.download(downloadJob, session);
 
-      let result;
       for await (const progress of generator) {
+        // Check if cancelled
+        if (abortController.signal.aborted) {
+          await generator.return(undefined as any);
+          await this.cleanupPartialDownload(outputDir, zipPath);
+          await jobQueue.cancel(queuedJob.id);
+          log.info(`Job #${queuedJob.id} cancelled`);
+          return;
+        }
+
         await jobQueue.updateProgress(queuedJob.id, progress.progress, progress.message);
 
         if (progress.phase === "error") {
           await jobQueue.fail(queuedJob.id, progress.message, queuedJob.volumeId);
           return;
         }
-
-        // Check if generator returned a value
-        if (progress.phase === "done") {
-          // The return value will come after the loop
-        }
       }
 
-      // Generator completed - get the return value via the last next() call
+      // Zip the downloaded pages
+      log.info(`Job #${queuedJob.id} zipping to ${zipPath}`);
+      await zipAndCleanup(outputDir, zipPath);
+
+      // Generator completed
       await jobQueue.complete(queuedJob.id, queuedJob.volumeId);
 
-      // Update volume file info
+      // Update volume file info (point to zip file)
       db.update(schema.volumes)
         .set({
-          filePath: outputDir,
+          filePath: zipPath,
           downloadedAt: new Date().toISOString(),
         })
         .where(eq(schema.volumes.id, queuedJob.volumeId!))
@@ -168,9 +207,37 @@ export class Worker {
 
       log.info(`Job #${queuedJob.id} completed`);
     } catch (error) {
+      if (abortController.signal.aborted) {
+        await this.cleanupPartialDownload(outputDir, zipPath);
+        await jobQueue.cancel(queuedJob.id);
+        log.info(`Job #${queuedJob.id} cancelled`);
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
-      log.error(`Job #${queuedJob.id} failed: ${message}`);
-      await jobQueue.fail(queuedJob.id, message, queuedJob.volumeId);
+      const maxJobRetries = getSettingValue<number>("download.jobRetryCount") ?? 1;
+
+      if (queuedJob.retryCount < maxJobRetries) {
+        log.warn(`Job #${queuedJob.id} failed: ${message}, scheduling retry (${queuedJob.retryCount + 1}/${maxJobRetries})`);
+        await this.cleanupPartialDownload(outputDir, zipPath);
+        await jobQueue.retry(queuedJob.id);
+      } else {
+        log.error(`Job #${queuedJob.id} failed: ${message} (no retries left)`);
+        await jobQueue.fail(queuedJob.id, message, queuedJob.volumeId);
+      }
+    } finally {
+      this.runningJobs.delete(queuedJob.id);
+    }
+  }
+
+  private async cleanupPartialDownload(outputDir: string, zipPath?: string): Promise<void> {
+    try {
+      await fs.rm(outputDir, { recursive: true, force: true });
+      if (zipPath) {
+        await fs.rm(zipPath, { force: true }).catch(() => {});
+      }
+      log.info(`Cleaned up partial download: ${outputDir}`);
+    } catch (err) {
+      log.warn(`Failed to clean up ${outputDir}: ${err}`);
     }
   }
 }

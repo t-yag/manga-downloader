@@ -206,30 +206,36 @@ export class BinbEngine {
     return { outputPath, width: maxWidth, height: totalHeight };
   }
 
-  private async nextPage(): Promise<boolean> {
+  private async nextPage(maxRetries = 2): Promise<boolean> {
     if (!this.page) {
       throw new Error('Page not initialized');
     }
 
     const currentImageCount = this.imageRequests.length;
-    const targetImageCount = currentImageCount + 3; // Wait for 3 new images
+    const targetImageCount = currentImageCount + 3;
 
     // Navigate page with ArrowLeft key
     await this.page.keyboard.press('ArrowLeft');
 
-    // Wait for 3 new images to load (max 10 seconds)
-    const startTime = Date.now();
-    const timeout = 10000;
+    // Wait for new images, with extended wait on retry (don't re-press key)
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const timeout = attempt === 0 ? 10000 : 5000;
+      const startTime = Date.now();
 
-    while (this.imageRequests.length < targetImageCount) {
-      if (Date.now() - startTime > timeout) {
-        break;
+      while (this.imageRequests.length < targetImageCount) {
+        if (Date.now() - startTime > timeout) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      if (this.imageRequests.length >= targetImageCount) break;
+
+      if (attempt < maxRetries) {
+        log.warn(`Page load timeout (got ${this.imageRequests.length - currentImageCount}/3 images), extending wait (${attempt + 1}/${maxRetries})`);
+      }
     }
 
     const newImagesCount = this.imageRequests.length - currentImageCount;
-    return newImagesCount > 0; // Return whether new images were loaded
+    return newImagesCount > 0;
   }
 
   async *download(
@@ -249,13 +255,6 @@ export class BinbEngine {
       // Check if we need to load the next page
       const imagesNeeded = pageNumber * 3;
       if (this.imageRequests.length < imagesNeeded) {
-        yield {
-          phase: 'loading',
-          progress: 0,
-          currentPage: pageNumber,
-          message: `Loading page ${pageNumber}`,
-        };
-
         const hasMorePages = await this.nextPage();
 
         if (!hasMorePages) {
@@ -267,27 +266,20 @@ export class BinbEngine {
       const { images } = await this.extractPageImages();
 
       if (images.length > 0) {
-        yield {
-          phase: 'combining',
-          progress: 0,
-          currentPage: pageNumber,
-          message: `Combining page ${pageNumber}`,
-        };
-
         await this.combineImages(
           images.map((img) => img.buffer),
           pageNumber,
           job.outputDir
         );
 
-        pageNumber++;
-
         yield {
           phase: 'downloading',
           progress: 0,
-          currentPage: pageNumber - 1,
-          message: `Page ${pageNumber - 1} completed`,
+          currentPage: pageNumber,
+          message: `${pageNumber}`,
         };
+
+        pageNumber++;
       } else {
         continueProcessing = false;
       }

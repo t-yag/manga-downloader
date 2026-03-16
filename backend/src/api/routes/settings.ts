@@ -4,8 +4,11 @@ import { eq } from "drizzle-orm";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   "download.basePath": "./data/downloads",
+  "download.pathTemplate": "{plugin}/{title}/vol_{volume}",
   "download.concurrency": 1,
   "download.retryCount": 3,
+  "download.requestInterval": 0,
+  "download.jobRetryCount": 1,
   "download.imageQuality": 95,
   "download.imageFormat": "jpg",
   "browser.headless": true,

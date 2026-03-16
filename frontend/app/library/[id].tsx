@@ -15,7 +15,8 @@ import {
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
-import { toast } from "sonner-native";
+import * as Clipboard from "expo-clipboard";
+import { toast } from "../../src/toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getLibraryTitle,
@@ -58,6 +59,30 @@ const REASON_LABELS: Record<string, string> = {
   rate_limited: "レート制限",
   unknown: "不明",
 };
+
+function getExternalUrl(pluginId: string, titleId: string): string | null {
+  switch (pluginId) {
+    case "cmoa":
+      return `https://www.cmoa.jp/title/${titleId}/`;
+    case "booklive":
+      return `https://booklive.jp/product/index/title_id/${titleId}`;
+    case "momonga":
+      return `https://momon-ga.com/manga/mo${titleId}/`;
+    case "nhentai":
+      return `https://nhentai.net/g/${titleId}/`;
+    default:
+      return null;
+  }
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await Clipboard.setStringAsync(text);
+    toast.success("コピーしました");
+  } catch {
+    toast.error("コピーに失敗しました");
+  }
+}
 
 function confirmAction(title: string, message: string, onConfirm: () => void) {
   if (Platform.OS === "web") {
@@ -107,7 +132,7 @@ export default function TitleDetailScreen() {
       const hasActive = vols.some(
         (v) => v.status === "queued" || v.status === "downloading"
       );
-      return hasActive ? 3000 : false;
+      return hasActive ? 2000 : false;
     },
   });
 
@@ -121,7 +146,7 @@ export default function TitleDetailScreen() {
     : undefined;
 
   const syncMutation = useMutation({
-    mutationFn: (volumes?: number[]) => syncTitle(Number(id), accountId, volumes),
+    mutationFn: (volumes: number[] | undefined) => syncTitle(Number(id), accountId, volumes),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["library", id] });
       const source = PLUGIN_LABELS[title?.pluginId ?? ""] ?? title?.pluginId ?? "";
@@ -141,7 +166,7 @@ export default function TitleDetailScreen() {
   });
 
   const downloadMutation = useMutation({
-    mutationFn: (vols: number[] | "available" | "all") =>
+    mutationFn: (vols: number[] | "available" | "all" | "error") =>
       downloadVolumes(Number(id), vols, accountId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["library", id] });
@@ -205,6 +230,15 @@ export default function TitleDetailScreen() {
     );
   }
 
+  const isStandalone = title.contentType === "standalone";
+
+  // Standalone helpers
+  const saVol = isStandalone ? title.volumes[0] : null;
+  const saCfg = saVol ? (STATUS_CONFIG[saVol.status] ?? STATUS_CONFIG.unknown) : STATUS_CONFIG.unknown;
+  const saIsActive = saVol?.status === "queued" || saVol?.status === "downloading";
+  const saIsBusy = downloadMutation.isPending || deleteVolumesMutation.isPending;
+
+  // --- Series layout helpers ---
   const volumes = title.volumes.sort((a, b) => a.volumeNum - b.volumeNum);
 
   const counts: Record<StatusFilter, number> = {
@@ -318,31 +352,31 @@ export default function TitleDetailScreen() {
                   </>
                 )}
               </View>
-              <View style={styles.metaRow}>
-                <Text style={styles.metaText}>
-                  {title.author ?? "著者不明"}
-                </Text>
+              <Text style={styles.metaText}>
+                {title.author ?? "著者不明"}
+              </Text>
+              <View style={styles.pluginRow}>
                 <View style={styles.pluginBadge}>
                   <Text style={styles.pluginBadgeText}>{PLUGIN_LABELS[title.pluginId] ?? title.pluginId}</Text>
                 </View>
-                {title.pluginId === "cmoa" && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      const url = `https://www.cmoa.jp/title/${title.titleId}/`;
+                <TouchableOpacity
+                  onPress={() => {
+                    const url = getExternalUrl(title.pluginId, title.titleId);
+                    if (url) {
                       Platform.OS === "web" ? Linking.openURL(url) : WebBrowser.openBrowserAsync(url);
-                    }}
-                    hitSlop={8}
-                    style={styles.sourceLinkBtn}
-                  >
-                    <Ionicons name="open-outline" size={13} color="#60a5fa" />
-                  </TouchableOpacity>
-                )}
+                    }
+                  }}
+                  hitSlop={8}
+                  style={styles.sourceLinkBtn}
+                >
+                  <Ionicons name="open-outline" size={13} color="#60a5fa" />
+                </TouchableOpacity>
               </View>
 
               <View style={styles.titleActions}>
                 <TouchableOpacity
                   style={styles.syncBtn}
-                  onPress={() => syncMutation.mutate()}
+                  onPress={() => syncMutation.mutate(undefined)}
                   disabled={syncMutation.isPending}
                 >
                   {syncMutation.isPending ? (
@@ -372,7 +406,125 @@ export default function TitleDetailScreen() {
           </View>
         </View>
 
-        {/* Filter chips + select all */}
+        {/* Genre tags (shown for both standalone and series) */}
+        {title.genres.length > 0 && (
+          <View style={styles.saTagRow}>
+            {title.genres.map((tag) => (
+              <View key={tag} style={styles.saTag}>
+                <Text style={styles.saTagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Standalone: status + actions */}
+        {isStandalone && saVol && (
+          <>
+
+            <View style={styles.saStatusCard}>
+              <View style={styles.saStatusRow}>
+                <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg }]}>
+                  <Ionicons name={saCfg.icon} size={12} color={saCfg.fg} />
+                  <Text style={[styles.listStatusText, { color: saCfg.fg, fontSize: 12 }]}>
+                    {saCfg.label}
+                  </Text>
+                </View>
+                {saIsActive && <ActivityIndicator color="#fb923c" size="small" />}
+              </View>
+
+              {saVol.status === "downloading" && saVol.jobProgress != null && saVol.jobProgress > 0 && (
+                <View style={styles.volProgressRow}>
+                  <View style={styles.volProgressBar}>
+                    <View style={[styles.volProgressFill, { width: `${Math.round(saVol.jobProgress * 100)}%` }]} />
+                  </View>
+                  <Text style={styles.volProgressText}>{Math.round(saVol.jobProgress * 100)}%</Text>
+                </View>
+              )}
+              {saVol.status === "downloading" && (saVol.jobProgress == null || saVol.jobProgress === 0) && saVol.jobMessage && /^\d+$/.test(saVol.jobMessage) && (
+                <View style={styles.volPageCountRow}>
+                  <Ionicons name="documents-outline" size={12} color="#60a5fa" />
+                  <Text style={styles.volPageCountText}>{saVol.jobMessage}ページ DL済</Text>
+                </View>
+              )}
+
+              {saVol.status === "done" && saVol.filePath && (
+                <View style={styles.filePathRow}>
+                  <Ionicons name="folder-outline" size={12} color="#64748b" style={{ marginTop: 2 }} />
+                  <Text style={styles.saFilePath} numberOfLines={2} selectable>{saVol.filePath}</Text>
+                  <TouchableOpacity onPress={() => copyToClipboard(saVol.filePath!)} hitSlop={8} style={styles.copyBtn}>
+                    <Ionicons name="copy-outline" size={13} color="#64748b" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {saVol.downloadedAt && (
+                <Text style={styles.saMetaItem}>{formatDate(saVol.downloadedAt)}</Text>
+              )}
+              {saVol.pageCount != null && (
+                <Text style={styles.saMetaItem}>{saVol.pageCount}ページ</Text>
+              )}
+            </View>
+
+            <View style={styles.saActions}>
+              {(saVol.status === "available" || saVol.status === "done") && (
+                <TouchableOpacity
+                  style={styles.actionBtnPrimary}
+                  onPress={() => downloadMutation.mutate([1])}
+                  disabled={saIsBusy}
+                >
+                  {downloadMutation.isPending ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-download" size={16} color="#fff" />
+                      <Text style={styles.actionBtnPrimaryText}>
+                        {saVol.status === "done" ? "再ダウンロード" : "ダウンロード"}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+              {saVol.status === "error" && (
+                <TouchableOpacity
+                  style={styles.actionBtnPrimary}
+                  onPress={() => downloadMutation.mutate([1])}
+                  disabled={saIsBusy}
+                >
+                  {downloadMutation.isPending ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh" size={16} color="#fff" />
+                      <Text style={styles.actionBtnPrimaryText}>再試行</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        )}
+
+        {/* Series: Error retry banner */}
+        {!isStandalone && counts.other > 0 && volumes.some((v) => v.status === "error") && (
+          <TouchableOpacity
+            style={styles.retryBanner}
+            onPress={() => downloadMutation.mutate("error")}
+            disabled={downloadMutation.isPending}
+          >
+            {downloadMutation.isPending ? (
+              <ActivityIndicator color="#f87171" size="small" />
+            ) : (
+              <>
+                <Ionicons name="refresh" size={14} color="#f87171" />
+                <Text style={styles.retryBannerText}>
+                  エラー {volumes.filter((v) => v.status === "error").length}巻を再試行
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {/* Series: Filter chips + select all */}
+        {!isStandalone && (<>
         <View style={styles.filterSection}>
           <TouchableOpacity
             style={styles.selectAllBtn}
@@ -457,11 +609,33 @@ export default function TitleDetailScreen() {
                   </View>
                 </View>
 
+                {/* Download progress */}
+                {vol.status === "downloading" && vol.jobProgress != null && vol.jobProgress > 0 && (
+                  <View style={styles.volProgressRow}>
+                    <View style={styles.volProgressBar}>
+                      <View style={[styles.volProgressFill, { width: `${Math.round(vol.jobProgress * 100)}%` }]} />
+                    </View>
+                    <Text style={styles.volProgressText}>{Math.round(vol.jobProgress * 100)}%</Text>
+                  </View>
+                )}
+                {vol.status === "downloading" && (vol.jobProgress == null || vol.jobProgress === 0) && vol.jobMessage && /^\d+$/.test(vol.jobMessage) && (
+                  <View style={styles.volPageCountRow}>
+                    <Ionicons name="documents-outline" size={11} color="#60a5fa" />
+                    <Text style={styles.volPageCountText}>{vol.jobMessage}ページ DL済</Text>
+                  </View>
+                )}
+
                 {/* File path */}
                 {vol.status === "done" && vol.filePath && (
-                  <Text style={styles.listFilePath} numberOfLines={2}>
-                    {vol.filePath}
-                  </Text>
+                  <View style={styles.filePathRow}>
+                    <Ionicons name="folder-outline" size={11} color="#64748b" style={{ marginTop: 1 }} />
+                    <Text style={styles.listFilePath} numberOfLines={2} selectable>
+                      {vol.filePath}
+                    </Text>
+                    <TouchableOpacity onPress={() => copyToClipboard(vol.filePath!)} hitSlop={8} style={styles.copyBtn}>
+                      <Ionicons name="copy-outline" size={12} color="#64748b" />
+                    </TouchableOpacity>
+                  </View>
                 )}
 
                 {/* Meta row */}
@@ -493,12 +667,15 @@ export default function TitleDetailScreen() {
 
         {/* Bottom padding for selection bar */}
         <View style={{ height: selected.size > 0 ? 80 : 40 }} />
+        </>)}
+
       </ScrollView>
 
       {/* Floating selection bar */}
-      {selected.size > 0 && (() => {
+      {!isStandalone && selected.size > 0 && (() => {
         const selectedVols = volumes.filter((v) => selected.has(v.volumeNum));
-        const downloadable = selectedVols.filter((v) => v.status === "available");
+        const downloadable = selectedVols.filter((v) => v.status === "available" || v.status === "done" || v.status === "error");
+        const retryable = selectedVols.filter((v) => v.status === "error");
         const deletable = selectedVols.filter((v) => v.status === "done");
         const isBusy = syncMutation.isPending || downloadMutation.isPending || deleteVolumesMutation.isPending;
         return (
@@ -606,13 +783,13 @@ const styles = StyleSheet.create({
   },
   sourceLinkBtn: { padding: 2 },
   titleText: { color: "#f1f5f9", fontSize: 20, fontWeight: "700" },
-  metaRow: {
+  metaText: { color: "#94a3b8", fontSize: 13, marginTop: 4 },
+  pluginRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     marginTop: 4,
   },
-  metaText: { color: "#94a3b8", fontSize: 13 },
   pluginBadge: {
     backgroundColor: "#334155",
     borderRadius: 4,
@@ -742,7 +919,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
   },
+  filePathRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 4,
+    marginTop: 2,
+  },
+  copyBtn: {
+    padding: 2,
+  },
   listFilePath: {
+    flex: 1,
     color: "#94a3b8",
     fontSize: 11,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
@@ -760,6 +947,44 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 11,
     flex: 1,
+  },
+
+  // Volume progress
+  volProgressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 3,
+  },
+  volProgressBar: {
+    flex: 1,
+    height: 3,
+    backgroundColor: "#334155",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  volProgressFill: {
+    height: "100%",
+    backgroundColor: "#3b82f6",
+    borderRadius: 2,
+  },
+  volProgressText: {
+    color: "#94a3b8",
+    fontSize: 10,
+    fontWeight: "600",
+    width: 28,
+    textAlign: "right",
+  },
+  volPageCountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 3,
+  },
+  volPageCountText: {
+    color: "#60a5fa",
+    fontSize: 10,
+    fontWeight: "600",
   },
 
   // Empty state
@@ -824,4 +1049,68 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   actionBtnDangerText: { color: "#f87171", fontSize: 13, fontWeight: "600" },
+
+  // Retry banner
+  retryBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#450a0a",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  retryBannerText: {
+    color: "#f87171",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  // Standalone layout
+  saTagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
+  },
+  saTag: {
+    backgroundColor: "#1e293b",
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  saTagText: {
+    color: "#94a3b8",
+    fontSize: 11,
+  },
+  saStatusCard: {
+    backgroundColor: "#1e293b",
+    borderRadius: 8,
+    padding: 14,
+    marginTop: 16,
+    gap: 6,
+  },
+  saStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  saFilePath: {
+    flex: 1,
+    color: "#94a3b8",
+    fontSize: 11,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  saMetaItem: {
+    color: "#64748b",
+    fontSize: 12,
+  },
+  saActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 16,
+  },
 });

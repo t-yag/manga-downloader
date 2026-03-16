@@ -162,16 +162,18 @@ export class CmoaScraper implements MetadataProvider {
   }
 
   /**
-   * Extract genres
+   * Extract genres from the visible tag badges on the title page.
    */
   private extractGenres($: cheerio.CheerioAPI): string[] {
     const genres: string[] = [];
-    $('a[href*="/genre/"]').each((i, el) => {
+
+    $(".titleTagArea .tag a").each((_, el) => {
       const genre = $(el).text().trim();
       if (genre && !genres.includes(genre)) {
         genres.push(genre);
       }
     });
+
     return genres;
   }
 

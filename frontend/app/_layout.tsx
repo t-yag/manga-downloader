@@ -2,7 +2,7 @@ import { Stack, useRouter, usePathname } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Toaster } from "sonner-native";
+import { ToastProvider } from "../src/components/ToastProvider";
 import { Platform, View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -117,21 +117,7 @@ export default function RootLayout() {
               }}
             />
           </Stack>
-          <Toaster
-            theme="dark"
-            position="top-center"
-            offset={isWeb ? SIDEBAR_WIDTH / 2 : 0}
-            toastOptions={{
-              style: {
-                backgroundColor: "#1e293b",
-                borderColor: "#334155",
-                borderWidth: 1,
-                ...(isWeb && { marginLeft: SIDEBAR_WIDTH }),
-              },
-              titleStyle: { color: "#f1f5f9" },
-              descriptionStyle: { color: "#94a3b8" },
-            }}
-          />
+          <ToastProvider />
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

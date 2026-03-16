@@ -72,6 +72,7 @@ export function initDatabase(): void {
       status TEXT DEFAULT 'pending',
       priority INTEGER DEFAULT 0,
       progress REAL DEFAULT 0,
+      retry_count INTEGER DEFAULT 0,
       message TEXT,
       error TEXT,
       started_at TEXT,
@@ -94,6 +95,25 @@ export function initDatabase(): void {
 
   if (!volColumnNames.has("thumbnail_url")) {
     sqlite.exec("ALTER TABLE volumes ADD COLUMN thumbnail_url TEXT");
+  }
+
+  const libColumns = sqlite
+    .prepare("PRAGMA table_info(library)")
+    .all() as { name: string }[];
+  const libColumnNames = new Set(libColumns.map((c) => c.name));
+
+  if (!libColumnNames.has("last_accessed_at")) {
+    sqlite.exec("ALTER TABLE library ADD COLUMN last_accessed_at TEXT");
+    sqlite.exec("UPDATE library SET last_accessed_at = COALESCE(updated_at, datetime('now'))");
+  }
+
+  const jobColumns = sqlite
+    .prepare("PRAGMA table_info(jobs)")
+    .all() as { name: string }[];
+  const jobColumnNames = new Set(jobColumns.map((c) => c.name));
+
+  if (!jobColumnNames.has("retry_count")) {
+    sqlite.exec("ALTER TABLE jobs ADD COLUMN retry_count INTEGER DEFAULT 0");
   }
 
   sqlite.close();

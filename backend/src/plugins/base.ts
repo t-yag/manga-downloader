@@ -9,6 +9,8 @@ export interface PluginManifest {
   id: string;
   name: string;
   version: string;
+  /** "series" = multi-volume title management, "standalone" = each item is independent */
+  contentType: "series" | "standalone";
   supportedFeatures: {
     search: boolean;
     metadata: boolean;

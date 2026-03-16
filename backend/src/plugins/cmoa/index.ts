@@ -190,6 +190,7 @@ export function createCmoaPlugin(): Plugin {
     id: "cmoa",
     name: "コミックシーモア",
     version: "1.0.0",
+    contentType: "series",
     supportedFeatures: {
       search: false,
       metadata: true,

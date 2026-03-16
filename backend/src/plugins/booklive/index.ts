@@ -95,6 +95,7 @@ export function createBookLivePlugin(options?: {
       id: "booklive",
       name: "BookLive",
       version: "1.0.0",
+      contentType: "series",
       supportedFeatures: {
         search: false,
         metadata: true,
