@@ -110,6 +110,7 @@ export class Worker {
       plugin: queuedJob.pluginId,
       title: libraryData.title,
       volume: volumeData.volumeNum,
+      unit: volumeData.unit ?? "vol",
       author: libraryData.author ?? undefined,
       tags: displayGenres,
     });

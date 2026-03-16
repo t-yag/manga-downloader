@@ -56,6 +56,8 @@ const REASON_LABELS: Record<string, string> = {
   purchased: "購入済み",
   not_purchased: "未購入",
   free: "無料公開",
+  waitfree_read: "閲覧中（期限あり）",
+  wait_free: "待てば¥0",
   subscription: "読み放題対象",
   rate_limited: "レート制限",
   unknown: "不明",
@@ -94,6 +96,8 @@ function getExternalUrl(pluginId: string, titleId: string): string | null {
       return `https://momon-ga.com/manga/mo${titleId}/`;
     case "nhentai":
       return `https://nhentai.net/g/${titleId}/`;
+    case "piccoma":
+      return `https://piccoma.com/web/product/${titleId}`;
     default:
       return null;
   }
@@ -138,6 +142,7 @@ export default function TitleDetailScreen() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [unitTab, setUnitTab] = useState<"ep" | "vol">("ep");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -147,6 +152,13 @@ export default function TitleDetailScreen() {
       setSelected(new Set());
     }, [])
   );
+
+  // Clear selection when switching unit tab
+  const switchUnitTab = (tab: "ep" | "vol") => {
+    setUnitTab(tab);
+    setSelected(new Set());
+    setFilter("all");
+  };
 
   const { data: title, isLoading } = useQuery({
     queryKey: ["library", id],
@@ -200,8 +212,8 @@ export default function TitleDetailScreen() {
   }, [autoSync, title, accountId]);
 
   const downloadMutation = useMutation({
-    mutationFn: (vols: number[] | "available" | "all" | "error") =>
-      downloadVolumes(Number(id), vols, accountId),
+    mutationFn: ({ vols, unit }: { vols: number[] | "available" | "all" | "error"; unit?: string }) =>
+      downloadVolumes(Number(id), vols, accountId, unit),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["library", id] });
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -273,7 +285,18 @@ export default function TitleDetailScreen() {
   const saIsBusy = downloadMutation.isPending || deleteVolumesMutation.isPending;
 
   // --- Series layout helpers ---
-  const volumes = title.volumes.sort((a, b) => a.volumeNum - b.volumeNum);
+  const allVolumes = title.volumes.sort((a, b) => a.volumeNum - b.volumeNum);
+
+  // Detect which units are present
+  const hasEp = allVolumes.some((v) => (v.unit ?? "vol") === "ep");
+  const hasVol = allVolumes.some((v) => (v.unit ?? "vol") === "vol");
+  const hasBothUnits = hasEp && hasVol;
+  const activeUnit = hasBothUnits ? unitTab : (hasEp ? "ep" : "vol");
+
+  // Filter by active unit tab
+  const volumes = hasBothUnits
+    ? allVolumes.filter((v) => (v.unit ?? "vol") === activeUnit)
+    : allVolumes;
 
   const counts: Record<StatusFilter, number> = {
     all: volumes.length,
@@ -510,7 +533,7 @@ export default function TitleDetailScreen() {
               {(saVol.status === "available" || saVol.status === "done") && (
                 <TouchableOpacity
                   style={styles.actionBtnPrimary}
-                  onPress={() => downloadMutation.mutate([1])}
+                  onPress={() => downloadMutation.mutate({ vols: [1] })}
                   disabled={saIsBusy}
                 >
                   {downloadMutation.isPending ? (
@@ -528,7 +551,7 @@ export default function TitleDetailScreen() {
               {saVol.status === "error" && (
                 <TouchableOpacity
                   style={styles.actionBtnPrimary}
-                  onPress={() => downloadMutation.mutate([1])}
+                  onPress={() => downloadMutation.mutate({ vols: [1] })}
                   disabled={saIsBusy}
                 >
                   {downloadMutation.isPending ? (
@@ -549,7 +572,7 @@ export default function TitleDetailScreen() {
         {!isStandalone && counts.other > 0 && volumes.some((v) => v.status === "error") && (
           <TouchableOpacity
             style={styles.retryBanner}
-            onPress={() => downloadMutation.mutate("error")}
+            onPress={() => downloadMutation.mutate({ vols: "error", unit: hasBothUnits ? activeUnit : undefined })}
             disabled={downloadMutation.isPending}
           >
             {downloadMutation.isPending ? (
@@ -558,11 +581,33 @@ export default function TitleDetailScreen() {
               <>
                 <Ionicons name="refresh" size={14} color="#f87171" />
                 <Text style={styles.retryBannerText}>
-                  エラー {volumes.filter((v) => v.status === "error").length}巻を再試行
+                  エラー {volumes.filter((v) => v.status === "error").length}{activeUnit === "ep" ? "話" : "巻"}を再試行
                 </Text>
               </>
             )}
           </TouchableOpacity>
+        )}
+
+        {/* Series: Unit tabs (話読み / 巻読み) */}
+        {!isStandalone && hasBothUnits && (
+          <View style={styles.unitTabRow}>
+            <TouchableOpacity
+              style={[styles.unitTab, activeUnit === "ep" && styles.unitTabActive]}
+              onPress={() => switchUnitTab("ep")}
+            >
+              <Text style={[styles.unitTabText, activeUnit === "ep" && styles.unitTabTextActive]}>
+                話読み {allVolumes.filter((v) => (v.unit ?? "vol") === "ep").length}話
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.unitTab, activeUnit === "vol" && styles.unitTabActive]}
+              onPress={() => switchUnitTab("vol")}
+            >
+              <Text style={[styles.unitTabText, activeUnit === "vol" && styles.unitTabTextActive]}>
+                巻読み {allVolumes.filter((v) => (v.unit ?? "vol") === "vol").length}巻
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Series: Filter chips + select all */}
@@ -633,8 +678,8 @@ export default function TitleDetailScreen() {
                   <Image source={{ uri: vol.thumbnailUrl }} style={styles.listThumb} />
                 </TouchableOpacity>
               ) : (
-                <View style={[styles.listThumbFallback, { backgroundColor: cfg.bg }]}>
-                  <Text style={[styles.listThumbNum, { color: cfg.fg }]}>
+                <View style={styles.listThumbFallback}>
+                  <Text style={styles.listThumbNum}>
                     {vol.volumeNum}
                   </Text>
                 </View>
@@ -644,7 +689,7 @@ export default function TitleDetailScreen() {
               <View style={styles.listMain}>
                 {/* Top row: volume label + status */}
                 <View style={styles.listTopRow}>
-                  <Text style={styles.listVolNum}>第{vol.volumeNum}巻</Text>
+                  <Text style={styles.listVolNum}>第{vol.volumeNum}{(vol.unit ?? "vol") === "ep" ? "話" : "巻"}</Text>
                   <View style={[styles.listStatusBadge, { backgroundColor: cfg.bg }]}>
                     <Ionicons name={cfg.icon} size={10} color={cfg.fg} />
                     <Text style={[styles.listStatusText, { color: cfg.fg }]}>
@@ -752,7 +797,7 @@ export default function TitleDetailScreen() {
         const isBusy = syncMutation.isPending || downloadMutation.isPending || deleteVolumesMutation.isPending;
         return (
           <View style={styles.selectionBar}>
-            <Text style={styles.selectionText}>{selected.size}巻を選択中</Text>
+            <Text style={styles.selectionText}>{selected.size}{activeUnit === "ep" ? "話" : "巻"}を選択中</Text>
             <View style={styles.selectionActions}>
               {/* Sync - always available */}
               <TouchableOpacity
@@ -774,7 +819,7 @@ export default function TitleDetailScreen() {
               {downloadable.length > 0 && (
                 <TouchableOpacity
                   style={styles.actionBtnPrimary}
-                  onPress={() => downloadMutation.mutate(Array.from(selected))}
+                  onPress={() => downloadMutation.mutate({ vols: Array.from(selected), unit: hasBothUnits ? activeUnit : undefined })}
                   disabled={isBusy}
                 >
                   {downloadMutation.isPending ? (
@@ -888,6 +933,32 @@ const styles = StyleSheet.create({
   syncBtnText: { color: "#60a5fa", fontSize: 13, fontWeight: "600" },
   deleteBtn: { padding: 6 },
 
+  // Unit tabs
+  unitTabRow: {
+    flexDirection: "row",
+    gap: 0,
+    marginBottom: 12,
+    backgroundColor: "#1e293b",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  unitTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  unitTabActive: {
+    backgroundColor: "#334155",
+  },
+  unitTabText: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  unitTabTextActive: {
+    color: "#e2e8f0",
+  },
+
   // Filter section
   filterSection: {
     flexDirection: "row",
@@ -959,10 +1030,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#1e293b",
   },
   listThumbNum: {
     fontSize: 14,
     fontWeight: "700",
+    color: "#64748b",
   },
   listMain: {
     flex: 1,

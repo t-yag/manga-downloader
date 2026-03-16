@@ -80,6 +80,7 @@ export interface Volume {
   id: number;
   libraryId: number | null;
   volumeNum: number;
+  unit: string | null;
   status: string;
   availabilityReason: string | null;
   freeUntil: string | null;
@@ -173,10 +174,10 @@ export function syncTitle(id: number, accountId?: number, volumes?: number[]) {
   );
 }
 
-export function downloadVolumes(id: number, volumes: number[] | "available" | "all" | "error", accountId?: number) {
+export function downloadVolumes(id: number, volumes: number[] | "available" | "all" | "error", accountId?: number, unit?: string) {
   return request<{ message: string; jobIds: number[]; volumes: number[] }>(
     `/api/library/${id}/download`,
-    { method: "POST", body: JSON.stringify({ volumes, accountId }) }
+    { method: "POST", body: JSON.stringify({ volumes, accountId, unit }) }
   );
 }
 

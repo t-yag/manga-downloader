@@ -7,12 +7,14 @@ import { logger } from "../logger.js";
 
 const log = logger.child({ module: "Storage" });
 
-const DEFAULT_PATH_TEMPLATE = "{title}_vol_{volume}";
+const DEFAULT_PATH_TEMPLATE = "{title}_{unit}_{volume}";
 
 interface PathTemplateVars {
   plugin: string;
   title: string;
   volume: number;
+  /** "vol" (default) or "ep" */
+  unit?: string;
   author?: string;
   tags?: string[];
 }
@@ -43,13 +45,16 @@ export function resolveOutputPath(vars: PathTemplateVars): {
 
   const tagsStr = (vars.tags ?? []).join(" ");
 
+  const unitStr = vars.unit ?? "vol";
+
   let resolved = template
     .replace(/\{plugin\}/g, sanitize(vars.plugin))
     .replace(/\{title\}/g, sanitize(vars.title))
     .replace(/\{volume\}/g, volStr)
+    .replace(/\{unit\}/g, unitStr)
     .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"))
     .replace(/\{tags\}/g, tagsStr ? sanitize(tagsStr) : "")
-    .replace(/\{tags_paren\}/g, tagsStr ? `(${sanitize(tagsStr)})` : "");
+    .replace(/\{tags_comma\}/g, sanitize((vars.tags ?? []).join(",")));
 
   // Clean up trailing separators from empty variables
   resolved = resolved.replace(/[\s\-_]+$/g, "").replace(/\/[\s\-_]+\//g, "/");

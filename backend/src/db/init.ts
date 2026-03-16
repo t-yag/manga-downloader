@@ -5,7 +5,8 @@ import { logger } from "../logger.js";
 
 /**
  * Initialize the database with schema.
- * Uses raw SQL for initial table creation (no migration files needed for bootstrap).
+ * Uses raw SQL for table creation (CREATE IF NOT EXISTS = idempotent).
+ * DB can be safely deleted and re-created at any time.
  */
 export function initDatabase(): void {
   const DB_DIR = process.env.DB_DIR || path.join(process.cwd(), "data", "db");
@@ -52,6 +53,7 @@ export function initDatabase(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       library_id INTEGER REFERENCES library(id) ON DELETE CASCADE,
       volume_num INTEGER NOT NULL,
+      unit TEXT DEFAULT 'vol',
       status TEXT DEFAULT 'unknown',
       availability_reason TEXT,
       free_until TEXT,
@@ -64,8 +66,8 @@ export function initDatabase(): void {
       metadata TEXT
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS volumes_library_vol_idx
-      ON volumes(library_id, volume_num);
+    CREATE UNIQUE INDEX IF NOT EXISTS volumes_library_unit_vol_idx
+      ON volumes(library_id, unit, volume_num);
 
     CREATE TABLE IF NOT EXISTS jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

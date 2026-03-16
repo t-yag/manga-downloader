@@ -18,3 +18,12 @@ node_modules/
 
 # Serena
 .serena/
+
+# Build artifacts
+backend/dist/
+
+# Runtime data (DB, cookies, downloads)
+backend/data/
+
+# Docs (local only)
+docs/

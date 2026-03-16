@@ -116,6 +116,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
             .values({
               libraryId: result.id,
               volumeNum: vol.volume,
+              unit: vol.unit ?? "vol",
               thumbnailUrl: vol.thumbnailUrl,
               metadata: JSON.stringify({
                 readerUrl: vol.readerUrl,

@@ -10,6 +10,7 @@ import type {
   ParsedUrl,
   AvailabilityChecker,
   VolumeAvailability,
+  VolumeQuery,
 } from "../base.js";
 import { CmoaAuth } from "./auth.js";
 import { CmoaScraper } from "./scraper.js";
@@ -71,7 +72,7 @@ class CmoaAvailabilityChecker implements AvailabilityChecker {
 
   async checkAvailability(
     titleId: string,
-    volumes: number[],
+    volumes: VolumeQuery[],
     session: SessionData | null
   ): Promise<VolumeAvailability[]> {
     const cookieString = session?.cookies
@@ -123,11 +124,11 @@ class CmoaAvailabilityChecker implements AvailabilityChecker {
     log.info(`HTML scrape done (${page - 1} page(s)): ${purchased.size} purchased`);
 
     // Map results for requested volumes
-    const results: VolumeAvailability[] = volumes.map((vol) => {
-      if (purchased.has(vol)) {
-        return { volume: vol, available: true, reason: "purchased" };
+    const results: VolumeAvailability[] = volumes.map((vq) => {
+      if (purchased.has(vq.volume)) {
+        return { volume: vq.volume, available: true, reason: "purchased" };
       }
-      return { volume: vol, available: false, reason: "not_purchased" };
+      return { volume: vq.volume, available: false, reason: "not_purchased" };
     });
 
     const availableCount = results.filter((r) => r.available).length;

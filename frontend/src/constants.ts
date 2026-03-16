@@ -3,4 +3,5 @@ export const PLUGIN_LABELS: Record<string, string> = {
   booklive: "BookLive",
   momonga: "momon:GA",
   nhentai: "nHentai",
+  piccoma: "ピッコマ",
 };

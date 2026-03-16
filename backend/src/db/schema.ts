@@ -40,6 +40,8 @@ export const volumes = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     libraryId: integer("library_id").references(() => library.id, { onDelete: "cascade" }),
     volumeNum: integer("volume_num").notNull(),
+    /** "vol" (default) or "ep" — used for file naming via {unit} template variable */
+    unit: text("unit").default("vol"),
     status: text("status", {
       enum: ["unknown", "available", "unavailable", "queued", "downloading", "done", "error", "cancelled"],
     }).default("unknown"),
@@ -56,7 +58,7 @@ export const volumes = sqliteTable(
     metadata: text("metadata"), // JSON
   },
   (table) => [
-    uniqueIndex("volumes_library_vol_idx").on(table.libraryId, table.volumeNum),
+    uniqueIndex("volumes_library_unit_vol_idx").on(table.libraryId, table.unit, table.volumeNum),
   ]
 );
 

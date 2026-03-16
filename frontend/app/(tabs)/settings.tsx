@@ -37,6 +37,7 @@ export default function SettingsScreen() {
 
   const [basePath, setBasePath] = useState("");
   const [pathTemplate, setPathTemplate] = useState("");
+  const [showTemplateInfo, setShowTemplateInfo] = useState(false);
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],
@@ -46,7 +47,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
-      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}_vol_{volume}");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}_{unit}_{volume}");
     }
   }, [settings]);
 
@@ -194,26 +195,55 @@ export default function SettingsScreen() {
           placeholderTextColor="#64748b"
           autoCapitalize="none"
         />
-        <Text style={styles.fieldLabel}>パステンプレート</Text>
+        <View style={styles.fieldLabelRow}>
+          <Text style={[styles.fieldLabel, { marginTop: 0, marginBottom: 0 }]}>パステンプレート</Text>
+          <TouchableOpacity
+            onPress={() => setShowTemplateInfo((v) => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={showTemplateInfo ? "information-circle" : "information-circle-outline"}
+              size={16}
+              color={showTemplateInfo ? "#60a5fa" : "#64748b"}
+            />
+          </TouchableOpacity>
+        </View>
+        {showTemplateInfo && (
+          <View style={styles.templateInfoBox}>
+            <Text style={styles.templateInfoTitle}>テンプレート変数</Text>
+            {[
+              ["{plugin}", "プラグインID（例: cmoa, piccoma）"],
+              ["{title}", "作品タイトル"],
+              ["{unit}", "巻・話の種別（例: vol, ep）"],
+              ["{volume}", "巻・話の番号（3桁ゼロ埋め、例: 001, 012）"],
+              ["{author}", "著者名"],
+              ["{tags}", "タグをアンダースコアで結合（例: タグ1_タグ2）"],
+              ["{tags_comma}", "タグをカンマ区切り（例: タグ1,タグ2）"],
+            ].map(([variable, desc]) => (
+              <View key={variable} style={styles.templateInfoRow}>
+                <Text style={styles.templateInfoVar}>{variable}</Text>
+                <Text style={styles.templateInfoDesc}>{desc}</Text>
+              </View>
+            ))}
+          </View>
+        )}
         <TextInput
           style={styles.input}
           value={pathTemplate}
           onChangeText={setPathTemplate}
-          placeholder="{plugin}/{title}/vol_{volume}"
+          placeholder="{plugin}/{title}/{unit}_{volume}"
           placeholderTextColor="#64748b"
           autoCapitalize="none"
         />
-        <Text style={styles.templateHint}>
-          {"変数: {plugin} {title} {volume} {author} {tags} {tags_paren}"}
-        </Text>
         <Text style={styles.templatePreview}>
           例: {basePath}/{pathTemplate
             .replace(/\{plugin\}/g, "cmoa")
             .replace(/\{title\}/g, "タイトル名")
+            .replace(/\{unit\}/g, "vol")
             .replace(/\{volume\}/g, "001")
             .replace(/\{author\}/g, "著者名")
             .replace(/\{tags\}/g, "タグ1_タグ2")
-            .replace(/\{tags_paren\}/g, "(タグ1_タグ2)")}.zip
+            .replace(/\{tags_comma\}/g, "タグ1,タグ2")}.zip
         </Text>
         <TouchableOpacity
           style={[styles.btn, { marginTop: 4 }]}
@@ -239,7 +269,14 @@ export default function SettingsScreen() {
             <Text style={styles.hintText}>プラグインがありません</Text>
           </View>
         ) : (
-          plugins.map((p: PluginInfo, i: number) => {
+          [...plugins].sort((a: PluginInfo, b: PluginInfo) => {
+            const order = (p: PluginInfo) => {
+              const isSeries = p.contentType === "series" ? 0 : 1;
+              const hasAuth = p.supportedFeatures.auth ? 0 : 1;
+              return isSeries * 2 + hasAuth;
+            };
+            return order(a) - order(b) || a.name.localeCompare(b.name);
+          }).map((p: PluginInfo, i: number) => {
             const pluginAccount = accounts.find(
               (acc: Account) => acc.pluginId === p.id
             );
@@ -467,7 +504,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#334155",
   },
-  lastRow: { borderBottomWidth: 0, paddingBottom: 0 },
+  lastRow: { borderBottomWidth: 0 },
   pluginHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -528,6 +565,42 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { color: "#94a3b8", fontSize: 14, fontWeight: "600" },
   noAuthHint: { color: "#64748b", fontSize: 12, marginTop: 6 },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  templateInfoBox: {
+    backgroundColor: "#0f172a",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  templateInfoTitle: {
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  templateInfoRow: {
+    flexDirection: "row",
+    marginBottom: 4,
+  },
+  templateInfoVar: {
+    color: "#60a5fa",
+    fontSize: 12,
+    fontFamily: "monospace" as any,
+    width: 110,
+  },
+  templateInfoDesc: {
+    color: "#94a3b8",
+    fontSize: 12,
+    flex: 1,
+  },
   templateHint: { color: "#64748b", fontSize: 12, marginBottom: 4 },
   templatePreview: {
     color: "#475569",

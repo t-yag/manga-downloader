@@ -73,11 +73,17 @@ export interface UrlParser {
 
 export interface VolumeAvailability {
   volume: number;
+  unit?: string;
   available: boolean;
   /** "purchased", "free", "subscription", "not_purchased", "unknown" */
   reason: string;
   /** Raw ViewMode from the content API (plugin-specific) */
   viewMode?: number;
+}
+
+export interface VolumeQuery {
+  volume: number;
+  unit?: string;
 }
 
 export interface AvailabilityChecker {
@@ -87,7 +93,7 @@ export interface AvailabilityChecker {
    */
   checkAvailability(
     titleId: string,
-    volumes: number[],
+    volumes: VolumeQuery[],
     session: SessionData | null
   ): Promise<VolumeAvailability[]>;
 }
@@ -107,6 +113,8 @@ export interface TitleInfo {
 
 export interface VolumeInfo {
   volume: number;
+  /** "vol" (default) or "ep" — determines file naming ({unit} template variable) */
+  unit?: string;
   readerUrl: string;
   /** Plugin-specific identifier (contentId, cid, etc.) */
   contentKey: string;

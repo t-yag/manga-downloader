@@ -219,6 +219,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           .values({
             libraryId: result.id,
             volumeNum: vol.volume,
+            unit: vol.unit ?? "vol",
             status: initialStatus,
             availabilityReason,
             freeUntil: vol.freeUntil ?? null,
@@ -360,12 +361,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       // Add any new volume entries
       let newVolumes = 0;
       for (const vol of titleInfo.volumes) {
+        const volUnit = vol.unit ?? "vol";
         const existing = db
           .select()
           .from(schema.volumes)
           .where(
             and(
               eq(schema.volumes.libraryId, title.id),
+              eq(schema.volumes.unit, volUnit),
               eq(schema.volumes.volumeNum, vol.volume)
             )
           )
@@ -377,6 +380,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
             .values({
               libraryId: title.id,
               volumeNum: vol.volume,
+              unit: volUnit,
               status: volStatus,
               freeUntil: vol.freeUntil ?? null,
               thumbnailUrl: vol.thumbnailUrl,
@@ -498,17 +502,17 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const volumeNums = vols.map((v) => v.volumeNum);
+      const volumeQueries = vols.map((v) => ({ volume: v.volumeNum, unit: v.unit ?? "vol" }));
       const results = await plugin.availabilityChecker.checkAvailability(
         title.titleId,
-        volumeNums,
+        volumeQueries,
         session
       );
 
       // Update volume statuses in DB
       const now = new Date().toISOString();
       for (const result of results) {
-        const vol = vols.find((v) => v.volumeNum === result.volume);
+        const vol = vols.find((v) => v.volumeNum === result.volume && (v.unit ?? "vol") === (result.unit ?? "vol"));
         if (!vol) continue;
 
         // Don't overwrite queued/downloading statuses
@@ -598,17 +602,17 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Helper: check availability for given volumes and update DB
-    async function checkAndUpdate(vols: { id: number; volumeNum: number; status: string | null; freeUntil: string | null }[]) {
+    async function checkAndUpdate(vols: { id: number; volumeNum: number; unit: string | null; status: string | null; freeUntil: string | null }[]) {
       if (vols.length === 0 || !plugin?.availabilityChecker) return [];
       const session = await resolveSession();
       const results = await plugin.availabilityChecker.checkAvailability(
         title!.titleId,
-        vols.map((v) => v.volumeNum),
+        vols.map((v) => ({ volume: v.volumeNum, unit: v.unit ?? "vol" })),
         session
       );
       const now = new Date().toISOString();
       for (const result of results) {
-        const vol = vols.find((v) => v.volumeNum === result.volume);
+        const vol = vols.find((v) => v.volumeNum === result.volume && (v.unit ?? "vol") === (result.unit ?? "vol"));
         if (!vol || vol.status === "queued" || vol.status === "downloading") continue;
 
         // Determine status/reason considering free campaigns
@@ -724,12 +728,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
     let newVolumes = 0;
     for (const vol of titleInfo.volumes) {
+      const volUnit = vol.unit ?? "vol";
       const existing = db
         .select()
         .from(schema.volumes)
         .where(
           and(
             eq(schema.volumes.libraryId, title.id),
+            eq(schema.volumes.unit, volUnit),
             eq(schema.volumes.volumeNum, vol.volume)
           )
         )
@@ -741,6 +747,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           .values({
             libraryId: title.id,
             volumeNum: vol.volume,
+            unit: volUnit,
             status: volStatus,
             freeUntil: vol.freeUntil ?? null,
             thumbnailUrl: vol.thumbnailUrl,
@@ -824,14 +831,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Series: check availability for unknown + free volumes (free may be purchasable)
+    // Series: check availability for volumes that aren't done/queued/downloading
     let availabilityResults: { volume: number; available: boolean; reason: string }[] = [];
     const checkTargetVols = db
       .select()
       .from(schema.volumes)
       .where(eq(schema.volumes.libraryId, title.id))
       .all()
-      .filter((v) => v.status === "unknown" || v.availabilityReason === "free");
+      .filter((v) => v.status !== "done" && v.status !== "queued" && v.status !== "downloading");
 
     try {
       availabilityResults = await checkAndUpdate(checkTargetVols);
@@ -856,9 +863,10 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post("/api/library/:id/download", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { volumes: volumeNums, accountId } = request.body as {
+    const { volumes: volumeNums, accountId, unit: filterUnit } = request.body as {
       volumes: number[] | "available" | "all" | "error";
       accountId?: number;
+      unit?: string;
     };
 
     const title = db
@@ -889,6 +897,11 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       targetVols = allVols.filter((v) => v.status !== "done" && v.status !== "queued" && v.status !== "downloading");
     } else {
       targetVols = allVols.filter((v) => volumeNums.includes(v.volumeNum));
+    }
+
+    // Apply unit filter (disambiguate ep vs vol when both exist)
+    if (filterUnit) {
+      targetVols = targetVols.filter((v) => (v.unit ?? "vol") === filterUnit);
     }
 
     // Filter out in-progress volumes (allow re-download of "done" volumes)

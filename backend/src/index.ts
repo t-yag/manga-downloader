@@ -10,6 +10,7 @@ import { createCmoaPlugin } from "./plugins/cmoa/index.js";
 import { createBookLivePlugin } from "./plugins/booklive/index.js";
 import { createMomongaPlugin } from "./plugins/momonga/index.js";
 import { createNhentaiPlugin } from "./plugins/nhentai/index.js";
+import { createPiccomaPlugin } from "./plugins/piccoma/index.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -25,6 +26,7 @@ async function main() {
   registry.register(createBookLivePlugin());
   registry.register(createMomongaPlugin());
   registry.register(createNhentaiPlugin());
+  registry.register(createPiccomaPlugin());
   logger.info(`Registered ${registry.getAll().length} plugin(s)`);
 
   // Start API server

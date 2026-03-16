@@ -5,9 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
@@ -37,7 +35,6 @@
     "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.15.0",
-    "drizzle-kit": "^0.31.4",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   },
