@@ -300,6 +300,16 @@ export default function TitleDetailScreen() {
     ? allVolumes.filter((v) => (v.unit ?? "vol") === activeUnit)
     : allVolumes;
 
+  // Piccoma episode thumbnail fallback: use the nearest preceding episode's thumbnail
+  const epThumbFallback = new Map<number, string>();
+  if (title.pluginId === "piccoma" && activeUnit === "ep") {
+    let lastThumb: string | null = null;
+    for (const v of volumes) {
+      if (v.thumbnailUrl) lastThumb = v.thumbnailUrl;
+      else if (lastThumb) epThumbFallback.set(v.volumeNum, lastThumb);
+    }
+  }
+
   const counts: Record<StatusFilter, number> = {
     all: volumes.length,
     done: volumes.filter((v) => v.status === "done").length,
@@ -666,9 +676,9 @@ export default function TitleDetailScreen() {
               </View>
 
               {/* Thumbnail */}
-              {vol.thumbnailUrl ? (
-                <TouchableOpacity onPress={() => setPreviewImage(vol.thumbnailUrl!)} activeOpacity={0.8}>
-                  <Image source={{ uri: vol.thumbnailUrl }} style={styles.listThumb} />
+              {(vol.thumbnailUrl || epThumbFallback.has(vol.volumeNum)) ? (
+                <TouchableOpacity onPress={() => setPreviewImage((vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))!)} activeOpacity={0.8}>
+                  <Image source={{ uri: (vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))! }} style={styles.listThumb} />
                 </TouchableOpacity>
               ) : (
                 <View style={styles.listThumbFallback}>
