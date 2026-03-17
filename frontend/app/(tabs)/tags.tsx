@@ -32,6 +32,7 @@ import {
 } from "../../src/api/client";
 import { useRouter } from "expo-router";
 import { SOURCE_LABELS, TAB_CONTENT_PADDING } from "../../src/constants";
+import { colors, radius } from "../../src/theme";
 
 type Tab = "rules" | "unset";
 type Action = "show" | "map" | "hide";
@@ -160,28 +161,28 @@ export default function TagsScreen() {
       {/* Top bar */}
       <View style={st.topBar}>
         <View style={st.searchBox}>
-          <Ionicons name="search" size={14} color="#64748b" />
+          <Ionicons name="search" size={14} color={colors.textMuted} />
           <TextInput
             style={st.searchInput}
             placeholder="タグを検索..."
-            placeholderTextColor="#475569"
+            placeholderTextColor={colors.textDim}
             value={search}
             onChangeText={setSearch}
             autoCapitalize="none"
           />
           {search.length > 0 && (
             <TouchableOpacity onPress={() => setSearch("")}>
-              <Ionicons name="close-circle" size={14} color="#475569" />
+              <Ionicons name="close-circle" size={14} color={colors.textDim} />
             </TouchableOpacity>
           )}
         </View>
         {tab === "rules" && (
           <>
             <TouchableOpacity style={st.iconBtn} onPress={() => setShowAddModal(true)}>
-              <Ionicons name="add" size={18} color="#60a5fa" />
+              <Ionicons name="add" size={18} color={colors.accentLight} />
             </TouchableOpacity>
             <TouchableOpacity style={st.iconBtn} onPress={() => setShowImportModal(true)}>
-              <Ionicons name="download-outline" size={16} color="#60a5fa" />
+              <Ionicons name="download-outline" size={16} color={colors.accentLight} />
             </TouchableOpacity>
           </>
         )}
@@ -191,15 +192,15 @@ export default function TagsScreen() {
           disabled={rebuildMut.isPending}
         >
           {rebuildMut.isPending ? (
-            <ActivityIndicator color="#60a5fa" size="small" />
+            <ActivityIndicator color={colors.accentLight} size="small" />
           ) : (
-            <Ionicons name="refresh" size={16} color="#60a5fa" />
+            <Ionicons name="refresh" size={16} color={colors.accentLight} />
           )}
         </TouchableOpacity>
       </View>
 
       {isLoading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#60a5fa" />
+        <ActivityIndicator style={{ marginTop: 40 }} size="large" color={colors.accentLight} />
       ) : tab === "rules" ? (
         <RulesTab
           showRules={showRules}
@@ -285,9 +286,9 @@ function RulesTab({
   };
 
   const sections = [
-    { key: "map", label: "変換", color: "#4ade80", items: mapRules },
-    { key: "hide", label: "非表示", color: "#f87171", items: hideRules },
-    { key: "show", label: "表示", color: "#60a5fa", items: showRules },
+    { key: "show", label: "表示", color: colors.accentLight, items: showRules },
+    { key: "map", label: "変換", color: colors.success, items: mapRules },
+    { key: "hide", label: "非表示", color: colors.error, items: hideRules },
   ];
 
   const total = showRules.length + mapRules.length + hideRules.length;
@@ -305,7 +306,7 @@ function RulesTab({
               <Text style={st.sectionCount}>{items.length}</Text>
               <Ionicons
                 name={collapsed ? "chevron-forward" : "chevron-down"}
-                size={13} color="#475569" style={{ marginLeft: "auto" }}
+                size={13} color={colors.textDim} style={{ marginLeft: "auto" }}
               />
             </TouchableOpacity>
 
@@ -333,7 +334,7 @@ function RulesTab({
                   disabled={deleteMut.isPending}
                   hitSlop={4}
                 >
-                  <Ionicons name="trash-outline" size={14} color="#475569" />
+                  <Ionicons name="trash-outline" size={14} color={colors.textDim} />
                 </TouchableOpacity>
               </View>
             ))}
@@ -343,7 +344,7 @@ function RulesTab({
 
       {total === 0 && (
         <View style={st.empty}>
-          <Ionicons name="pricetag-outline" size={40} color="#334155" />
+          <Ionicons name="pricetag-outline" size={40} color={colors.borderAccent} />
           <Text style={st.emptyText}>
             {search ? "該当するルールがありません" : "ルールがまだありません"}
           </Text>
@@ -382,7 +383,7 @@ function UnsetTab({
         <View style={st.unsetDefaultToggle}>
           {(["show", "hide"] as const).map((v) => {
             const active = unsetDefault === v;
-            const color = v === "show" ? "#60a5fa" : "#f87171";
+            const color = v === "show" ? colors.accentLight : colors.error;
             return (
               <TouchableOpacity
                 key={v}
@@ -405,7 +406,7 @@ function UnsetTab({
 
       {tags.length === 0 ? (
         <View style={st.empty}>
-          <Ionicons name="checkmark-circle-outline" size={40} color="#4ade80" />
+          <Ionicons name="checkmark-circle-outline" size={40} color={colors.success} />
           <Text style={st.emptyText}>
             {search ? "該当するタグがありません" : "すべてのタグにルールが設定されています"}
           </Text>
@@ -475,7 +476,7 @@ function EditRuleDialog({
           <View style={st.modalHeader}>
             <Text style={st.modalTagName}>{rule.original}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color="#64748b" />
+              <Ionicons name="close" size={22} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
 
@@ -541,7 +542,7 @@ function CreateRuleDialog({
           <View style={st.modalHeader}>
             <Text style={st.modalTitle}>タグ設定</Text>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color="#64748b" />
+              <Ionicons name="close" size={22} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
 
@@ -559,7 +560,7 @@ function CreateRuleDialog({
                 value={original}
                 onChangeText={setOriginal}
                 placeholder="タグ名を入力"
-                placeholderTextColor="#475569"
+                placeholderTextColor={colors.textDim}
                 autoCapitalize="none"
                 autoFocus
               />
@@ -634,25 +635,25 @@ function ImportDialog({
           <View style={st.modalHeader}>
             <Text style={st.modalTitle}>タグルール インポート</Text>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color="#64748b" />
+              <Ionicons name="close" size={22} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
 
           <Text style={st.label}>モード</Text>
           <View style={st.actionRow}>
             <TouchableOpacity
-              style={[st.actionBtn, mode === "merge" && { borderColor: "#60a5fa", backgroundColor: "#60a5fa15" }]}
+              style={[st.actionBtn, mode === "merge" && { borderColor: colors.accentLight, backgroundColor: colors.accentGlow }]}
               onPress={() => setMode("merge")}
             >
-              <Text style={[st.actionBtnText, mode === "merge" && { color: "#60a5fa", fontWeight: "700" }]}>
+              <Text style={[st.actionBtnText, mode === "merge" && { color: colors.accentLight, fontWeight: "700" }]}>
                 マージ
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[st.actionBtn, mode === "replace" && { borderColor: "#f87171", backgroundColor: "#f8717115" }]}
+              style={[st.actionBtn, mode === "replace" && { borderColor: colors.error, backgroundColor: `${colors.error}15` }]}
               onPress={() => setMode("replace")}
             >
-              <Text style={[st.actionBtnText, mode === "replace" && { color: "#f87171", fontWeight: "700" }]}>
+              <Text style={[st.actionBtnText, mode === "replace" && { color: colors.error, fontWeight: "700" }]}>
                 置換
               </Text>
             </TouchableOpacity>
@@ -667,7 +668,7 @@ function ImportDialog({
             value={jsonText}
             onChangeText={setJsonText}
             placeholder={'{ "lolicon": "ロリ", "SALE": null }'}
-            placeholderTextColor="#475569"
+            placeholderTextColor={colors.textDim}
             multiline
             autoCapitalize="none"
             autoCorrect={false}
@@ -759,13 +760,13 @@ function TagItemsList({
         <Text style={st.modalMeta}>
           出典: {plugins.map((p) => SOURCE_LABELS[p] ?? p).join(", ")} · {count}件
         </Text>
-        <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={12} color="#64748b" style={{ marginLeft: 4 }} />
+        <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={12} color={colors.textMuted} style={{ marginLeft: 4 }} />
       </TouchableOpacity>
 
       {expanded && (
         <ScrollView style={st.tagItemsContainer} nestedScrollEnabled>
           {loading && items.length === 0 ? (
-            <ActivityIndicator size="small" color="#60a5fa" style={{ padding: 12 }} />
+            <ActivityIndicator size="small" color={colors.accentLight} style={{ padding: 12 }} />
           ) : items.length === 0 && loaded ? (
             <Text style={st.tagItemsEmpty}>該当する作品がありません</Text>
           ) : (
@@ -784,7 +785,7 @@ function TagItemsList({
               {items.length < total && (
                 <TouchableOpacity onPress={handleLoadMore} disabled={loading} style={st.tagItemsMore}>
                   {loading ? (
-                    <ActivityIndicator size="small" color="#60a5fa" />
+                    <ActivityIndicator size="small" color={colors.accentLight} />
                   ) : (
                     <Text style={st.tagItemsMoreText}>
                       もっと見る (残り{total - items.length}件)
@@ -808,9 +809,9 @@ function ActionRow({
   onSelect: (a: Action) => void;
 }) {
   const actions: { key: Action; label: string; color: string }[] = [
-    { key: "show", label: "表示", color: "#60a5fa" },
-    { key: "map", label: "変換", color: "#4ade80" },
-    { key: "hide", label: "非表示", color: "#f87171" },
+    { key: "show", label: "表示", color: colors.accentLight },
+    { key: "map", label: "変換", color: colors.success },
+    { key: "hide", label: "非表示", color: colors.error },
   ];
 
   return (
@@ -848,7 +849,7 @@ function MapInput({
         value={value}
         onChangeText={onChange}
         placeholder="変換先タグ"
-        placeholderTextColor="#475569"
+        placeholderTextColor={colors.textDim}
         autoCapitalize="none"
         autoFocus
         onSubmitEditing={onSubmit}
@@ -875,7 +876,7 @@ function SaveButton({
       disabled={disabled}
     >
       {loading ? (
-        <ActivityIndicator color="#fff" size="small" />
+        <ActivityIndicator color={colors.white} size="small" />
       ) : (
         <Text style={st.saveBtnText}>{label}</Text>
       )}
@@ -888,39 +889,39 @@ function SaveButton({
 // =============================================================================
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0f172a", padding: 16 },
+  container: { flex: 1, backgroundColor: colors.bg, padding: 16 },
 
   // Tabs
   tabBar: { flexDirection: "row", gap: 4, marginBottom: 12 },
   tab: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8,
-    backgroundColor: "#1e293b",
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: radius.sm,
+    backgroundColor: colors.bgCard,
   },
-  tabActive: { backgroundColor: "#172554", borderWidth: 1, borderColor: "#1e40af" },
-  tabText: { color: "#64748b", fontSize: 13, fontWeight: "600" },
-  tabTextActive: { color: "#60a5fa" },
+  tabActive: { backgroundColor: colors.infoBg, borderWidth: 1, borderColor: "rgba(59,130,246,0.3)" },
+  tabText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  tabTextActive: { color: colors.accentLight },
   tabBadge: {
-    backgroundColor: "#334155", borderRadius: 10,
+    backgroundColor: colors.borderAccent, borderRadius: 10,
     paddingHorizontal: 6, paddingVertical: 1,
   },
-  tabBadgeActive: { backgroundColor: "#1e40af" },
-  tabBadgeText: { color: "#64748b", fontSize: 10, fontWeight: "700" },
-  tabBadgeTextActive: { color: "#93c5fd" },
+  tabBadgeActive: { backgroundColor: "rgba(59,130,246,0.3)" },
+  tabBadgeText: { color: colors.textMuted, fontSize: 10, fontWeight: "700" },
+  tabBadgeTextActive: { color: colors.accentPale },
 
   // Top bar
   topBar: { flexDirection: "row", gap: 8, marginBottom: 10 },
   searchBox: {
     flex: 1, flexDirection: "row", alignItems: "center",
-    backgroundColor: "#1e293b", borderRadius: 8, paddingHorizontal: 10, height: 36, gap: 6,
+    backgroundColor: colors.bgCard, borderRadius: radius.sm, paddingHorizontal: 10, height: 36, gap: 6,
   },
   searchInput: {
-    flex: 1, color: "#e2e8f0", fontSize: 13, paddingVertical: 0,
+    flex: 1, color: colors.textLight, fontSize: 13, paddingVertical: 0,
     ...(Platform.OS === "web" ? { outlineStyle: "none" } : {}),
   } as any,
   iconBtn: {
-    width: 36, height: 36, backgroundColor: "#1e293b",
-    borderRadius: 8, alignItems: "center", justifyContent: "center",
+    width: 36, height: 36, backgroundColor: colors.bgCard,
+    borderRadius: radius.sm, alignItems: "center", justifyContent: "center",
   },
 
   // List
@@ -932,42 +933,42 @@ const st = StyleSheet.create({
   },
   sectionDot: { width: 6, height: 6, borderRadius: 3 },
   sectionLabel: { fontSize: 12, fontWeight: "700" },
-  sectionCount: { color: "#475569", fontSize: 11 },
+  sectionCount: { color: colors.textDim, fontSize: 11 },
 
   // Row
   row: {
     flexDirection: "row", alignItems: "center",
-    backgroundColor: "#1e293b", borderRadius: 8, marginBottom: 2,
+    backgroundColor: colors.bgCard, borderRadius: radius.sm, marginBottom: 2,
   },
   rowBody: { flex: 1, paddingLeft: 12, paddingVertical: 8, gap: 2 },
   nameLine: { flexDirection: "row", alignItems: "center" },
-  tagName: { color: "#e2e8f0", fontSize: 13, fontWeight: "600", flexShrink: 1 },
-  tagNameHidden: { color: "#64748b", textDecorationLine: "line-through" },
-  arrow: { color: "#4ade80", fontSize: 11, marginHorizontal: 5 },
-  mapped: { color: "#4ade80", fontSize: 12, fontWeight: "600", flexShrink: 1 },
+  tagName: { color: colors.textLight, fontSize: 13, fontWeight: "600", flexShrink: 1 },
+  tagNameHidden: { color: colors.textMuted },
+  arrow: { color: colors.success, fontSize: 11, marginHorizontal: 5 },
+  mapped: { color: colors.success, fontSize: 12, fontWeight: "600", flexShrink: 1 },
   metaLine: { flexDirection: "row", alignItems: "center", gap: 5 },
-  sources: { color: "#475569", fontSize: 10, flexShrink: 1 },
-  count: { color: "#475569", fontSize: 10, marginLeft: "auto" },
+  sources: { color: colors.textDim, fontSize: 10, flexShrink: 1 },
+  count: { color: colors.textDim, fontSize: 10, marginLeft: "auto" },
   quickBtn: { paddingHorizontal: 10, paddingVertical: 12 },
 
   // Unset default toggle
   unsetDefaultBar: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: "#1e293b", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: colors.bgCard, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 8,
     marginBottom: 10,
   },
-  unsetDefaultLabel: { color: "#94a3b8", fontSize: 12, fontWeight: "600" },
+  unsetDefaultLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
   unsetDefaultToggle: { flexDirection: "row", gap: 6 },
   unsetDefaultBtn: {
     paddingHorizontal: 12, paddingVertical: 5, borderRadius: 6,
-    borderWidth: 1.5, borderColor: "#334155", minWidth: 52, alignItems: "center",
+    borderWidth: 1.5, borderColor: colors.borderAccent, minWidth: 52, alignItems: "center",
   },
-  unsetDefaultBtnText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
+  unsetDefaultBtnText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
 
   // Empty
   empty: { alignItems: "center", marginTop: 60, gap: 10 },
-  emptyText: { color: "#475569", fontSize: 13 },
-  emptyHint: { color: "#334155", fontSize: 11 },
+  emptyText: { color: colors.textDim, fontSize: 13 },
+  emptyHint: { color: colors.borderAccent, fontSize: 11 },
 
   // Tag items expandable
   tagItemsToggle: {
@@ -975,66 +976,67 @@ const st = StyleSheet.create({
     paddingBottom: 4,
   },
   tagItemsContainer: {
-    backgroundColor: "#0f172a", borderRadius: 8,
+    backgroundColor: colors.bg, borderRadius: radius.sm,
     maxHeight: 200, overflow: "hidden",
     marginBottom: 4,
   },
-  tagItemsEmpty: { color: "#475569", fontSize: 12, padding: 12, textAlign: "center" },
+  tagItemsEmpty: { color: colors.textDim, fontSize: 12, padding: 12, textAlign: "center" },
   tagItemRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 12, paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#1e293b",
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
   },
-  tagItemTitle: { color: "#e2e8f0", fontSize: 12, fontWeight: "600", flex: 1, marginRight: 8 },
-  tagItemPlugin: { color: "#475569", fontSize: 10, flexShrink: 0 },
+  tagItemTitle: { color: colors.textLight, fontSize: 12, fontWeight: "600", flex: 1, marginRight: 8 },
+  tagItemPlugin: { color: colors.textDim, fontSize: 10, flexShrink: 0 },
   tagItemsMore: { alignItems: "center", paddingVertical: 8 },
-  tagItemsMoreText: { color: "#60a5fa", fontSize: 11 },
+  tagItemsMoreText: { color: colors.accentLight, fontSize: 11 },
 
   // Modal
   modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.6)",
+    flex: 1, backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center", alignItems: "center", padding: 24,
   },
   modal: {
-    backgroundColor: "#1e293b", borderRadius: 14, padding: 24,
+    backgroundColor: colors.bgCard, borderRadius: radius.lg, padding: 24,
     width: "100%", maxWidth: 420,
+    borderWidth: 1, borderColor: colors.borderLight,
   },
   modalHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginBottom: 12,
   },
-  modalTitle: { color: "#94a3b8", fontSize: 14, fontWeight: "700" },
-  modalTagName: { color: "#f1f5f9", fontSize: 20, fontWeight: "700", marginBottom: 4 },
-  modalMeta: { color: "#64748b", fontSize: 12, marginBottom: 0 },
+  modalTitle: { color: colors.textSecondary, fontSize: 14, fontWeight: "700" },
+  modalTagName: { color: colors.textPrimary, fontSize: 20, fontWeight: "700", marginBottom: 4 },
+  modalMeta: { color: colors.textMuted, fontSize: 12, marginBottom: 0 },
 
   // Label
-  label: { color: "#94a3b8", fontSize: 11, fontWeight: "600", letterSpacing: 0.5, marginBottom: 8 },
+  label: { color: colors.textSecondary, fontSize: 11, fontWeight: "600", letterSpacing: 0.5, marginBottom: 8 },
 
   // Action
   actionRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
   actionBtn: {
     flex: 1, alignItems: "center",
     paddingVertical: 10, borderRadius: 8,
-    borderWidth: 1.5, borderColor: "#334155",
+    borderWidth: 1.5, borderColor: colors.borderAccent,
   },
-  actionBtnText: { color: "#64748b", fontSize: 13, fontWeight: "600" },
+  actionBtnText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
 
   // Map
   mapRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "#0f172a", borderRadius: 8,
+    backgroundColor: colors.bg, borderRadius: radius.sm,
     paddingHorizontal: 14, marginBottom: 16,
   },
-  mapArrow: { color: "#4ade80", fontSize: 15, fontWeight: "700" },
+  mapArrow: { color: colors.success, fontSize: 15, fontWeight: "700" },
   mapInput: {
-    flex: 1, color: "#e2e8f0", fontSize: 15,
+    flex: 1, color: colors.textLight, fontSize: 15,
     paddingVertical: Platform.OS === "web" ? 12 : 14,
     ...(Platform.OS === "web" ? { outlineStyle: "none" } : {}),
   } as any,
 
   // Text input
   textInput: {
-    backgroundColor: "#0f172a", borderRadius: 8, color: "#e2e8f0",
+    backgroundColor: colors.bg, borderRadius: radius.sm, color: colors.textLight,
     fontSize: 15, paddingHorizontal: 14, marginBottom: 16,
     paddingVertical: Platform.OS === "web" ? 12 : 14,
     ...(Platform.OS === "web" ? { outlineStyle: "none" } : {}),
@@ -1042,21 +1044,21 @@ const st = StyleSheet.create({
 
   // JSON input
   jsonInput: {
-    backgroundColor: "#0f172a", borderRadius: 8, color: "#e2e8f0",
+    backgroundColor: colors.bg, borderRadius: radius.sm, color: colors.textLight,
     fontSize: 12, fontFamily: Platform.OS === "web" ? "monospace" : undefined,
     paddingHorizontal: 14, paddingVertical: 12,
     minHeight: 120, textAlignVertical: "top", marginBottom: 4,
     ...(Platform.OS === "web" ? { outlineStyle: "none" } : {}),
   } as any,
-  hintText: { color: "#475569", fontSize: 10, marginBottom: 12 },
-  warningText: { color: "#f87171", fontSize: 11, marginTop: -10, marginBottom: 12 },
-  errorText: { color: "#f87171", fontSize: 12, marginBottom: 12 },
+  hintText: { color: colors.textDim, fontSize: 10, marginBottom: 12 },
+  warningText: { color: colors.error, fontSize: 11, marginTop: -10, marginBottom: 12 },
+  errorText: { color: colors.error, fontSize: 12, marginBottom: 12 },
 
   // Save
   saveBtn: {
-    backgroundColor: "#2563eb", borderRadius: 8,
+    backgroundColor: colors.accent, borderRadius: radius.sm,
     paddingVertical: 13, alignItems: "center",
   },
   saveBtnDisabled: { opacity: 0.4 },
-  saveBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  saveBtnText: { color: colors.white, fontWeight: "700", fontSize: 15 },
 });

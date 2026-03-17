@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ToastProvider } from "../src/components/ToastProvider";
 import { Platform, View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { colors } from "../src/theme";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,7 +37,7 @@ function WebSidebar() {
     <View style={sidebarStyles.sidebar}>
       {SIDEBAR_ITEMS.map((item) => {
         const focused = isActive(item);
-        const color = focused ? "#60a5fa" : "#64748b";
+        const color = focused ? colors.accentLight : colors.textMuted;
 
         return (
           <TouchableOpacity
@@ -60,8 +61,8 @@ const sidebarStyles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: SIDEBAR_WIDTH,
-    backgroundColor: "#0f172a",
-    borderRightColor: "#1e293b",
+    backgroundColor: colors.bg,
+    borderRightColor: colors.border,
     borderRightWidth: 1,
     paddingTop: 32,
     paddingHorizontal: 8,
@@ -77,7 +78,7 @@ const sidebarStyles = StyleSheet.create({
     borderRadius: 8,
   },
   itemActive: {
-    backgroundColor: "#1e293b",
+    backgroundColor: colors.bgCard,
   },
   label: {
     fontSize: 14,
@@ -95,13 +96,13 @@ export default function RootLayout() {
           {isWeb && <WebSidebar />}
           <Stack
             screenOptions={{
-              headerStyle: { backgroundColor: "#0f172a" },
-              headerTintColor: "#f1f5f9",
+              headerStyle: { backgroundColor: colors.bg },
+              headerTintColor: colors.textPrimary,
               headerTitleStyle: { fontWeight: "700", fontSize: 17 },
               headerShadowVisible: false,
               contentStyle: {
-                backgroundColor: "#0f172a",
-                ...(isWeb && { marginLeft: SIDEBAR_WIDTH, paddingHorizontal: 16, paddingTop: 16 }),
+                backgroundColor: colors.bg,
+                ...(isWeb && { marginLeft: SIDEBAR_WIDTH }),
               },
             }}
           >
@@ -112,9 +113,7 @@ export default function RootLayout() {
             <Stack.Screen
               name="library/[id]"
               options={{
-                title: "タイトル詳細",
-                headerBackTitle: "戻る",
-                ...(isWeb && { headerShown: false }),
+                headerShown: false,
               }}
             />
           </Stack>

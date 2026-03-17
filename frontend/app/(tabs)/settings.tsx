@@ -27,6 +27,7 @@ import {
   type PluginInfo,
 } from "../../src/api/client";
 import { SOURCE_COLORS, DEFAULT_SOURCE_COLOR } from "../../src/constants";
+import { colors, radius } from "../../src/theme";
 
 export default function SettingsScreen() {
   const queryClient = useQueryClient();
@@ -166,7 +167,7 @@ export default function SettingsScreen() {
     <ScrollView style={styles.container}>
       {/* Server Connection */}
       <View style={[styles.sectionHeaderRow, { marginTop: 0 }]}>
-        <Ionicons name="server-outline" size={16} color="#94a3b8" />
+        <Ionicons name="server-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.sectionLabel}>サーバー接続</Text>
       </View>
       <View style={styles.section}>
@@ -176,7 +177,7 @@ export default function SettingsScreen() {
           value={apiUrl}
           onChangeText={setApiUrl}
           placeholder="http://192.168.1.x:3000"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
         />
         <View style={styles.connectionRow}>
@@ -186,7 +187,7 @@ export default function SettingsScreen() {
             disabled={testing}
           >
             {testing ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={colors.white} size="small" />
             ) : (
               <Text style={styles.btnText}>接続テスト</Text>
             )}
@@ -201,7 +202,7 @@ export default function SettingsScreen() {
               <Ionicons
                 name={connected ? "checkmark-circle" : "close-circle"}
                 size={16}
-                color={connected ? "#4ade80" : "#f87171"}
+                color={connected ? colors.success : colors.error}
               />
               <Text style={connected ? styles.statusOk : styles.statusErr}>
                 {connected ? "接続OK" : "接続失敗"}
@@ -213,7 +214,7 @@ export default function SettingsScreen() {
 
       {/* Download Settings */}
       <View style={styles.sectionHeaderRow}>
-        <Ionicons name="download-outline" size={16} color="#94a3b8" />
+        <Ionicons name="download-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.sectionLabel}>ダウンロード設定</Text>
       </View>
       <View style={styles.section}>
@@ -223,7 +224,7 @@ export default function SettingsScreen() {
           value={basePath}
           onChangeText={setBasePath}
           placeholder="./data/downloads"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
         />
         <View style={styles.fieldLabelRow}>
@@ -235,7 +236,7 @@ export default function SettingsScreen() {
             <Ionicons
               name={showTemplateInfo ? "information-circle" : "information-circle-outline"}
               size={16}
-              color={showTemplateInfo ? "#60a5fa" : "#64748b"}
+              color={showTemplateInfo ? colors.accentLight : colors.textMuted}
             />
           </TouchableOpacity>
         </View>
@@ -265,7 +266,7 @@ export default function SettingsScreen() {
           value={pathTemplate}
           onChangeText={setPathTemplate}
           placeholder="{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
         />
         <Text style={styles.templatePreview}>
@@ -286,7 +287,7 @@ export default function SettingsScreen() {
           disabled={updateDownloadSettingsMutation.isPending}
         >
           {updateDownloadSettingsMutation.isPending ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={colors.white} size="small" />
           ) : (
             <Text style={styles.btnText}>保存</Text>
           )}
@@ -295,7 +296,7 @@ export default function SettingsScreen() {
 
       {/* Plugins */}
       <View style={styles.sectionHeaderRow}>
-        <Ionicons name="layers-outline" size={16} color="#94a3b8" />
+        <Ionicons name="layers-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.sectionLabel}>データソース</Text>
       </View>
       <View style={[styles.section, { paddingVertical: 6 }]}>
@@ -340,7 +341,7 @@ export default function SettingsScreen() {
                           : "document-outline"
                       }
                       size={11}
-                      color="#64748b"
+                      color={colors.textMuted}
                     />
                     <Text style={styles.contentTypeBadgeText}>
                       {p.contentType === "series" ? "シリーズ" : "単巻"}
@@ -359,11 +360,11 @@ export default function SettingsScreen() {
                         setNewAccPassword("");
                       }}
                     >
-                      <Ionicons name="person" size={13} color="#94a3b8" />
+                      <Ionicons name="person" size={13} color={colors.textSecondary} />
                       <Text style={styles.pluginAccountEmail}>
                         {pluginAccount.label ?? pluginAccount.pluginId}
                       </Text>
-                      <Ionicons name="create-outline" size={14} color="#64748b" />
+                      <Ionicons name="create-outline" size={14} color={colors.textMuted} />
                     </TouchableOpacity>
 
                     {/* Session status & actions */}
@@ -380,9 +381,9 @@ export default function SettingsScreen() {
                               : styles.sessionInactive,
                           ]}>
                             <View style={[styles.sessionDot, {
-                              backgroundColor: status === "active" ? "#4ade80"
-                                : status === "expired" ? "#fbbf24"
-                                : "#64748b",
+                              backgroundColor: status === "active" ? colors.success
+                                : status === "expired" ? colors.warning
+                                : colors.textMuted,
                             }]} />
                             <Text style={
                               status === "active" ? styles.sessionTextActive
@@ -406,7 +407,7 @@ export default function SettingsScreen() {
                           disabled={loginMutation.isPending}
                         >
                           {loginMutation.isPending && loginMutation.variables === pluginAccount.id ? (
-                            <ActivityIndicator color="#60a5fa" size="small" />
+                            <ActivityIndicator color={colors.accentLight} size="small" />
                           ) : (
                             <Text style={styles.sessionTextBtnLabel}>
                               {pluginAccount.session?.hasCookies ? "再ログイン" : "ログイン"}
@@ -436,7 +437,7 @@ export default function SettingsScreen() {
                       setNewAccPassword("");
                     }}
                   >
-                    <Ionicons name="log-in-outline" size={14} color="#60a5fa" />
+                    <Ionicons name="log-in-outline" size={14} color={colors.accentLight} />
                     <Text style={styles.loginBtnText}>ログイン</Text>
                   </TouchableOpacity>
                 )}
@@ -446,7 +447,7 @@ export default function SettingsScreen() {
                     <TextInput
                       style={styles.input}
                       placeholder="メールアドレス"
-                      placeholderTextColor="#64748b"
+                      placeholderTextColor={colors.textMuted}
                       value={newAccEmail}
                       onChangeText={setNewAccEmail}
                       autoCapitalize="none"
@@ -455,7 +456,7 @@ export default function SettingsScreen() {
                     <TextInput
                       style={styles.input}
                       placeholder="パスワード"
-                      placeholderTextColor="#64748b"
+                      placeholderTextColor={colors.textMuted}
                       value={newAccPassword}
                       onChangeText={setNewAccPassword}
                       secureTextEntry
@@ -483,7 +484,7 @@ export default function SettingsScreen() {
                       >
                         {addAccountMutation.isPending ||
                         updateAccountMutation.isPending ? (
-                          <ActivityIndicator color="#fff" size="small" />
+                          <ActivityIndicator color={colors.white} size="small" />
                         ) : (
                           <Text style={styles.btnText}>
                             {pluginAccount ? "更新" : "ログイン"}
@@ -509,7 +510,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0f172a", padding: 16 },
+  container: { flex: 1, backgroundColor: colors.bg, padding: 16 },
 
   // Section
   sectionHeaderRow: {
@@ -520,35 +521,37 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionLabel: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "600",
     letterSpacing: 0.5,
   },
   section: {
-    backgroundColor: "#1e293b",
-    borderRadius: 10,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
     padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
 
   // Fields
   fieldLabel: {
-    color: "#cbd5e1",
+    color: colors.textSemi,
     fontSize: 13,
     fontWeight: "600",
     marginBottom: 4,
     marginTop: 8,
   },
   input: {
-    backgroundColor: "#0f172a",
-    color: "#fff",
-    borderRadius: 8,
+    backgroundColor: colors.bg,
+    color: colors.white,
+    borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: colors.border,
   },
 
   // Connection
@@ -559,33 +562,33 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: radius.sm,
   },
-  connectionOk: { backgroundColor: "#052e16" },
-  connectionErr: { backgroundColor: "#450a0a" },
+  connectionOk: { backgroundColor: colors.successBg },
+  connectionErr: { backgroundColor: colors.errorBg },
 
   // Buttons
   btn: {
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: "center",
   },
-  btnGreen: { backgroundColor: "#16a34a", marginTop: 8 },
-  btnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  statusOk: { color: "#4ade80", fontSize: 13, fontWeight: "600" },
-  statusErr: { color: "#f87171", fontSize: 13, fontWeight: "600" },
+  btnGreen: { backgroundColor: colors.successDark, marginTop: 8 },
+  btnText: { color: colors.white, fontWeight: "700", fontSize: 14 },
+  statusOk: { color: colors.success, fontSize: 13, fontWeight: "600" },
+  statusErr: { color: colors.error, fontSize: 13, fontWeight: "600" },
 
   // Empty hint
   emptyHint: { flexDirection: "row", alignItems: "center", gap: 6 },
-  hintText: { color: "#64748b", fontSize: 13, flex: 1 },
+  hintText: { color: colors.textMuted, fontSize: 13, flex: 1 },
 
   // Plugins
   pluginCard: {
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#334155",
+    borderBottomColor: colors.borderAccent,
   },
   lastRow: { borderBottomWidth: 0 },
   pluginHeader: {
@@ -603,7 +606,7 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  pluginName: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  pluginName: { color: colors.white, fontSize: 14, fontWeight: "600" },
   contentTypeBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -612,7 +615,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  contentTypeBadgeText: { fontSize: 11, fontWeight: "600", color: "#64748b" },
+  contentTypeBadgeText: { fontSize: 11, fontWeight: "600", color: colors.textMuted },
 
   // Plugin account
   pluginAccountRow: {
@@ -621,7 +624,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 8,
   },
-  pluginAccountEmail: { color: "#cbd5e1", fontSize: 13, flex: 1 },
+  pluginAccountEmail: { color: colors.textSemi, fontSize: 13, flex: 1 },
   activeBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -630,18 +633,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  activeBadgeOn: { backgroundColor: "#052e16" },
-  activeBadgeOff: { backgroundColor: "#292524" },
+  activeBadgeOn: { backgroundColor: colors.successBg },
+  activeBadgeOff: { backgroundColor: colors.neutralBg },
   activeDot: { width: 6, height: 6, borderRadius: 3 },
-  activeTextOn: { color: "#4ade80", fontSize: 11, fontWeight: "600" },
-  activeTextOff: { color: "#a8a29e", fontSize: 11, fontWeight: "600" },
+  activeTextOn: { color: colors.success, fontSize: 11, fontWeight: "600" },
+  activeTextOff: { color: colors.neutral, fontSize: 11, fontWeight: "600" },
   loginBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     marginTop: 8,
   },
-  loginBtnText: { color: "#60a5fa", fontSize: 13, fontWeight: "600" },
+  loginBtnText: { color: colors.accentLight, fontSize: 13, fontWeight: "600" },
   loginForm: { marginTop: 10 },
   loginFormButtons: {
     flexDirection: "row",
@@ -652,7 +655,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  cancelBtnText: { color: "#94a3b8", fontSize: 14, fontWeight: "600" },
+  cancelBtnText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
   sessionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -667,13 +670,13 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  sessionActive: { backgroundColor: "#052e16" },
-  sessionExpired: { backgroundColor: "#422006" },
-  sessionInactive: { backgroundColor: "#1c1917" },
+  sessionActive: { backgroundColor: colors.successBg },
+  sessionExpired: { backgroundColor: colors.warningBg },
+  sessionInactive: { backgroundColor: colors.neutralBgDark },
   sessionDot: { width: 6, height: 6, borderRadius: 3 },
-  sessionTextActive: { color: "#4ade80", fontSize: 11, fontWeight: "600" },
-  sessionTextExpired: { color: "#fbbf24", fontSize: 11, fontWeight: "600" },
-  sessionTextInactive: { color: "#64748b", fontSize: 11, fontWeight: "600" },
+  sessionTextActive: { color: colors.success, fontSize: 11, fontWeight: "600" },
+  sessionTextExpired: { color: colors.warning, fontSize: 11, fontWeight: "600" },
+  sessionTextInactive: { color: colors.textMuted, fontSize: 11, fontWeight: "600" },
   sessionActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -683,9 +686,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  sessionTextBtnLabel: { color: "#60a5fa", fontSize: 12, fontWeight: "600" },
-  sessionTextBtnLabelDanger: { color: "#f87171", fontSize: 12, fontWeight: "600" },
-  noAuthHint: { color: "#64748b", fontSize: 12, marginTop: 6 },
+  sessionTextBtnLabel: { color: colors.accentLight, fontSize: 12, fontWeight: "600" },
+  sessionTextBtnLabelDanger: { color: colors.error, fontSize: 12, fontWeight: "600" },
+  noAuthHint: { color: colors.textMuted, fontSize: 12, marginTop: 6 },
   fieldLabelRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -694,15 +697,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   templateInfoBox: {
-    backgroundColor: "#0f172a",
-    borderRadius: 8,
+    backgroundColor: colors.bg,
+    borderRadius: radius.sm,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: colors.borderAccent,
   },
   templateInfoTitle: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 8,
@@ -712,19 +715,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   templateInfoVar: {
-    color: "#60a5fa",
+    color: colors.accentLight,
     fontSize: 12,
     fontFamily: "monospace" as any,
     width: 110,
   },
   templateInfoDesc: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 12,
     flex: 1,
   },
-  templateHint: { color: "#64748b", fontSize: 12, marginBottom: 4 },
+  templateHint: { color: colors.textMuted, fontSize: 12, marginBottom: 4 },
   templatePreview: {
-    color: "#475569",
+    color: colors.textDim,
     fontSize: 12,
     marginBottom: 8,
     fontFamily: "monospace" as any,

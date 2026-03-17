@@ -2,8 +2,9 @@ import { Tabs } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform } from "react-native";
+import { colors } from "../../src/theme";
 
-const NATIVE_TAB_CONTENT_STYLE = { backgroundColor: "#0f172a" };
+const NATIVE_TAB_CONTENT_STYLE = { backgroundColor: colors.bg };
 
 function NativeTabsLayout() {
   return (
@@ -43,21 +44,21 @@ function DefaultTabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#60a5fa",
-        tabBarInactiveTintColor: "#64748b",
+        tabBarActiveTintColor: colors.accentLight,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: Platform.OS === "web"
           ? { display: "none" }
           : {
-              backgroundColor: "#0f172a",
-              borderTopColor: "#1e293b",
+              backgroundColor: colors.bg,
+              borderTopColor: colors.border,
               borderTopWidth: 1,
               paddingBottom: 4,
               height: 56,
             },
         headerStyle: {
-          backgroundColor: "#0f172a",
+          backgroundColor: colors.bg,
         },
-        headerTintColor: "#f1f5f9",
+        headerTintColor: colors.textPrimary,
         headerTitleStyle: {
           fontWeight: "700",
           fontSize: 17,

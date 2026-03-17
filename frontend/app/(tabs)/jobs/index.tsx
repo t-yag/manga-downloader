@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  Modal,
+  Pressable,
 } from "react-native";
 import { toast } from "../../../src/toast";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,6 +19,7 @@ import { useIsFocused } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, cancelJob, cancelAllJobs, type Job } from "../../../src/api/client";
 import { TAB_CONTENT_PADDING } from "../../../src/constants";
+import { colors, radius } from "../../../src/theme";
 
 function confirmAction(title: string, message: string, onConfirm: () => void) {
   if (Platform.OS === "web") {
@@ -37,11 +40,11 @@ const STATUS_CONFIG: Record<
   string,
   { icon: keyof typeof Ionicons.glyphMap; color: string; label: string }
 > = {
-  pending: { icon: "time-outline", color: "#94a3b8", label: "待機" },
-  running: { icon: "arrow-down-circle", color: "#fb923c", label: "実行中" },
-  done: { icon: "checkmark-circle", color: "#4ade80", label: "完了" },
-  error: { icon: "alert-circle", color: "#f87171", label: "エラー" },
-  cancelled: { icon: "close-circle", color: "#a8a29e", label: "中止" },
+  pending: { icon: "time-outline", color: colors.textSecondary, label: "待機" },
+  running: { icon: "arrow-down-circle", color: colors.orange, label: "実行中" },
+  done: { icon: "checkmark-circle", color: colors.success, label: "完了" },
+  error: { icon: "alert-circle", color: colors.error, label: "エラー" },
+  cancelled: { icon: "close-circle", color: colors.neutral, label: "中止" },
 };
 
 const FILTERS: { key: StatusFilter; label: string }[] = [
@@ -145,6 +148,8 @@ export default function JobsScreen() {
     return true;
   });
 
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+
   const pendingCount = allJobs.filter((j) => j.status === "pending").length;
   const activeCount = allJobs.filter(
     (j) => j.status === "running" || j.status === "pending"
@@ -162,7 +167,7 @@ export default function JobsScreen() {
       : item.pluginId;
 
     return (
-      <View style={styles.row}>
+      <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => setSelectedJob(item)}>
         <Ionicons name={cfg.icon} size={16} color={cfg.color} style={styles.rowIcon} />
         <View style={styles.rowBody}>
           <View style={styles.rowMain}>
@@ -184,36 +189,29 @@ export default function JobsScreen() {
           )}
           {isRunning && progressPct === 0 && item.message && /^\d+$/.test(item.message) && (
             <View style={styles.pageCountRow}>
-              <Ionicons name="documents-outline" size={12} color="#60a5fa" />
+              <Ionicons name="documents-outline" size={12} color={colors.accentLight} />
               <Text style={styles.pageCountText}>{item.message}ページ DL済</Text>
             </View>
-          )}
-          {item.error && (
-            <Text style={styles.errorText} numberOfLines={1}>{item.error}</Text>
-          )}
-          {!isRunning && !item.error && item.startedAt && (item.status === "done" || item.status === "error") && (
-            <Text style={styles.durationText}>
-              {formatDuration(item.startedAt, item.finishedAt)}
-            </Text>
           )}
         </View>
         {(isPending || isRunning) && (
           <TouchableOpacity
             style={styles.cancelBtn}
-            onPress={() =>
+            onPress={(e) => {
+              e.stopPropagation();
               confirmAction(
                 "キャンセル",
                 isRunning
                   ? "実行中のジョブをキャンセルしますか？\nダウンロード済みのファイルは削除されます。"
                   : "このジョブをキャンセルしますか？",
                 () => cancelMutation.mutate(item.id)
-              )
-            }
+              );
+            }}
           >
-            <Ionicons name="close" size={14} color="#fca5a5" />
+            <Ionicons name="close" size={14} color={colors.errorLight} />
           </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -256,7 +254,7 @@ export default function JobsScreen() {
               )
             }
           >
-            <Ionicons name="stop-circle-outline" size={14} color="#fca5a5" />
+            <Ionicons name="stop-circle-outline" size={14} color={colors.errorLight} />
             <Text style={styles.cancelAllText}>全キャンセル</Text>
           </TouchableOpacity>
         )}
@@ -267,7 +265,7 @@ export default function JobsScreen() {
         <ActivityIndicator
           size="large"
           style={{ marginTop: 40 }}
-          color="#60a5fa"
+          color={colors.accentLight}
         />
       ) : (
         <FlatList
@@ -281,13 +279,13 @@ export default function JobsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#60a5fa"
-              colors={["#60a5fa"]}
+              tintColor={colors.accentLight}
+              colors={[colors.accentLight]}
             />
           }
           ListFooterComponent={
             hasMore && allJobs.length > 0 ? (
-              <ActivityIndicator size="small" color="#64748b" style={{ marginVertical: 12 }} />
+              <ActivityIndicator size="small" color={colors.textMuted} style={{ marginVertical: 12 }} />
             ) : null
           }
           ListEmptyComponent={
@@ -295,7 +293,7 @@ export default function JobsScreen() {
               <Ionicons
                 name="download-outline"
                 size={48}
-                color="#334155"
+                color={colors.borderAccent}
                 style={{ marginBottom: 12 }}
               />
               <Text style={styles.emptyTitle}>
@@ -310,12 +308,72 @@ export default function JobsScreen() {
           }
         />
       )}
+
+      {/* Job detail modal */}
+      <Modal
+        visible={selectedJob !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedJob(null)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setSelectedJob(null)}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            {selectedJob && (() => {
+              const cfg = STATUS_CONFIG[selectedJob.status] ?? STATUS_CONFIG.pending;
+              const jobLabel = selectedJob.titleName
+                ? selectedJob.volumeNum != null
+                  ? `${selectedJob.titleName} ${selectedJob.volumeNum}${selectedJob.unit === "ep" ? "話" : "巻"}`
+                  : selectedJob.titleName
+                : selectedJob.pluginId;
+              return (
+                <>
+                  <View style={styles.modalHeader}>
+                    <Ionicons name={cfg.icon} size={18} color={cfg.color} />
+                    <Text style={styles.modalTitle} numberOfLines={2}>{jobLabel}</Text>
+                  </View>
+                  <View style={styles.modalRows}>
+                    <View style={styles.modalRow}>
+                      <Text style={styles.modalLabel}>ステータス</Text>
+                      <Text style={[styles.modalValue, { color: cfg.color }]}>{cfg.label}</Text>
+                    </View>
+                    <View style={styles.modalRow}>
+                      <Text style={styles.modalLabel}>プラグイン</Text>
+                      <Text style={styles.modalValue}>{selectedJob.pluginId}</Text>
+                    </View>
+                    {selectedJob.createdAt && (
+                      <View style={styles.modalRow}>
+                        <Text style={styles.modalLabel}>作成日時</Text>
+                        <Text style={styles.modalValue}>{formatTime(selectedJob.createdAt)}</Text>
+                      </View>
+                    )}
+                    {selectedJob.startedAt && (
+                      <View style={styles.modalRow}>
+                        <Text style={styles.modalLabel}>所要時間</Text>
+                        <Text style={styles.modalValue}>{formatDuration(selectedJob.startedAt, selectedJob.finishedAt)}</Text>
+                      </View>
+                    )}
+                    {selectedJob.error && (
+                      <View style={styles.modalErrorRow}>
+                        <Text style={styles.modalLabel}>エラー</Text>
+                        <Text style={styles.modalErrorText}>{selectedJob.error}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity style={styles.modalClose} onPress={() => setSelectedJob(null)}>
+                    <Text style={styles.modalCloseText}>閉じる</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0f172a", padding: 16 },
+  container: { flex: 1, backgroundColor: colors.bg, padding: 16 },
 
   // Filters
   filterRow: {
@@ -327,18 +385,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#1e293b",
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   filterTabActive: {
-    backgroundColor: "#1e3a5f",
+    backgroundColor: colors.accentDim,
   },
-  filterText: { color: "#64748b", fontSize: 13, fontWeight: "600" },
-  filterTextActive: { color: "#60a5fa" },
+  filterText: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  filterTextActive: { color: colors.accentLight },
   filterBadge: {
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.accent,
     borderRadius: 10,
     minWidth: 18,
     height: 18,
@@ -346,20 +404,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 4,
   },
-  filterBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  filterBadgeText: { color: colors.white, fontSize: 10, fontWeight: "700" },
 
   cancelAllBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#7f1d1d",
-    borderRadius: 8,
+    backgroundColor: colors.errorBg,
+    borderRadius: radius.sm,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginLeft: "auto",
   },
   cancelAllText: {
-    color: "#fca5a5",
+    color: colors.errorLight,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -368,8 +426,8 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1e293b",
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 4,
@@ -395,23 +453,23 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   dlTag: {
-    color: "#60a5fa",
+    color: colors.accentLight,
     fontSize: 10,
     fontWeight: "700",
-    backgroundColor: "#1e3a5f",
+    backgroundColor: colors.accentDim,
     borderRadius: 3,
     paddingHorizontal: 4,
     paddingVertical: 1,
     overflow: "hidden",
   },
   rowTitle: {
-    color: "#e2e8f0",
+    color: colors.textLight,
     fontSize: 13,
     fontWeight: "600",
     flex: 1,
   },
   rowTime: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 11,
     flexShrink: 0,
   },
@@ -426,17 +484,17 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 4,
-    backgroundColor: "#334155",
+    backgroundColor: colors.borderAccent,
     borderRadius: 2,
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#3b82f6",
+    backgroundColor: colors.accent,
     borderRadius: 2,
   },
   progressText: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "600",
     width: 32,
@@ -450,14 +508,12 @@ const styles = StyleSheet.create({
     gap: 4,
     marginTop: 3,
   },
-  pageCountText: { color: "#60a5fa", fontSize: 11, fontWeight: "600" },
-  durationText: { color: "#64748b", fontSize: 11, marginTop: 2 },
-  errorText: { color: "#f87171", fontSize: 11, marginTop: 2 },
+  pageCountText: { color: colors.accentLight, fontSize: 11, fontWeight: "600" },
 
   // Cancel
   cancelBtn: {
     marginLeft: 8,
-    backgroundColor: "#7f1d1d",
+    backgroundColor: colors.errorBg,
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -467,12 +523,77 @@ const styles = StyleSheet.create({
 
   // Empty
   emptyContainer: { alignItems: "center", marginTop: 60 },
-  emptyTitle: { color: "#94a3b8", fontSize: 16, fontWeight: "600" },
+  emptyTitle: { color: colors.textSecondary, fontSize: 16, fontWeight: "600" },
   emptyHint: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 14,
     marginTop: 4,
     textAlign: "center",
     paddingHorizontal: 20,
+  },
+
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
+    padding: 20,
+    width: "100%",
+    maxWidth: 360,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: colors.textLight,
+    fontSize: 15,
+    fontWeight: "700",
+    flex: 1,
+  },
+  modalRows: {
+    gap: 10,
+  },
+  modalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  modalLabel: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  modalValue: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  modalErrorRow: {
+    gap: 4,
+  },
+  modalErrorText: {
+    color: colors.error,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  modalClose: {
+    marginTop: 20,
+    alignItems: "center",
+    paddingVertical: 10,
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.sm,
+  },
+  modalCloseText: {
+    color: colors.accentLight,
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

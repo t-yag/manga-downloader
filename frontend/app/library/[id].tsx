@@ -12,8 +12,12 @@ import {
   Modal,
   Linking,
   TextInput,
+  ImageBackground,
 } from "react-native";
-import { useLocalSearchParams, useRouter, useFocusEffect, useIsFocused } from "expo-router";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter, useFocusEffect, useIsFocused, Stack } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -29,6 +33,7 @@ import {
   getAccounts,
   type Volume,
 } from "../../src/api/client";
+import { colors, spacing, radius, coverShadow } from "../../src/theme";
 
 const STATUS_CONFIG: Record<
   string,
@@ -39,13 +44,13 @@ const STATUS_CONFIG: Record<
     icon: keyof typeof Ionicons.glyphMap;
   }
 > = {
-  done: { bg: "#052e16", fg: "#4ade80", label: "取得済", icon: "checkmark-circle" },
-  available: { bg: "#172554", fg: "#60a5fa", label: "取得可", icon: "cloud-download-outline" },
-  unavailable: { bg: "#292524", fg: "#a8a29e", label: "未購入", icon: "lock-closed-outline" },
-  queued: { bg: "#422006", fg: "#facc15", label: "待機中", icon: "time-outline" },
-  downloading: { bg: "#431407", fg: "#fb923c", label: "取得中", icon: "arrow-down-circle" },
-  error: { bg: "#450a0a", fg: "#f87171", label: "エラー", icon: "alert-circle" },
-  unknown: { bg: "#1e293b", fg: "#94a3b8", label: "不明", icon: "help-circle-outline" },
+  done: { bg: colors.successBg, fg: colors.success, label: "取得済", icon: "checkmark-circle" },
+  available: { bg: colors.infoBg, fg: colors.accentLight, label: "取得可", icon: "cloud-download-outline" },
+  unavailable: { bg: colors.neutralBg, fg: colors.neutral, label: "未購入", icon: "lock-closed-outline" },
+  queued: { bg: colors.warningBg, fg: colors.yellow, label: "待機中", icon: "time-outline" },
+  downloading: { bg: colors.orangeBg, fg: colors.orange, label: "取得中", icon: "arrow-down-circle" },
+  error: { bg: colors.errorBg, fg: colors.error, label: "エラー", icon: "alert-circle" },
+  unknown: { bg: colors.bgElevated, fg: colors.textSecondary, label: "不明", icon: "help-circle-outline" },
 };
 
 type StatusFilter = "all" | "done" | "available" | "unavailable" | "other";
@@ -258,6 +263,8 @@ export default function TitleDetailScreen() {
     onError: (err: Error) => toast.error("エラー", { description: err.message }),
   });
 
+  const insets = useSafeAreaInsets();
+
   const toggleSelect = (vol: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -269,11 +276,10 @@ export default function TitleDetailScreen() {
 
   if (isLoading || !title) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.wrapper, { paddingTop: insets.top, justifyContent: "center", alignItems: "center" }]}>
         <ActivityIndicator
           size="large"
-          style={{ marginTop: 40 }}
-          color="#60a5fa"
+          color={colors.accentLight}
         />
       </View>
     );
@@ -354,147 +360,199 @@ export default function TitleDetailScreen() {
     }
   };
 
-  return (
-    <View style={styles.wrapper}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {/* Title info */}
-        <View style={styles.titleSection}>
-          <View style={styles.titleRow}>
-            {title.coverUrl && (
-              <TouchableOpacity onPress={() => setPreviewImage(title.coverUrl!)} activeOpacity={0.8}>
-                <Image source={{ uri: title.coverUrl }} style={styles.coverImage} />
-              </TouchableOpacity>
-            )}
-            <View style={styles.titleInfo}>
-              <View style={styles.titleTextRow}>
-                {isEditingTitle ? (
-                  <View style={styles.editFieldsContainer}>
-                    <View style={styles.editTitleRow}>
-                      <TextInput
-                        style={[styles.editTitleInput, Platform.OS === "web" && { outlineStyle: "none" } as any]}
-                        value={editTitle}
-                        onChangeText={setEditTitle}
-                        autoFocus
-                        selectTextOnFocus
-                        placeholder="タイトル"
-                        placeholderTextColor="#475569"
-                      />
-                    </View>
-                    <View style={styles.editTitleRow}>
-                      <TextInput
-                        style={[styles.editAuthorInput, Platform.OS === "web" && { outlineStyle: "none" } as any]}
-                        value={editAuthor}
-                        onChangeText={setEditAuthor}
-                        placeholder="著者"
-                        placeholderTextColor="#475569"
-                      />
-                    </View>
-                    <View style={styles.editButtonRow}>
-                      <TouchableOpacity
-                        onPress={() => {
-                          const trimmedTitle = editTitle.trim();
-                          const trimmedAuthor = editAuthor.trim();
-                          const params: { title?: string; author?: string } = {};
-                          if (trimmedTitle && trimmedTitle !== title.title) params.title = trimmedTitle;
-                          if (trimmedAuthor !== (title.author ?? "")) params.author = trimmedAuthor;
-                          if (Object.keys(params).length > 0) {
-                            updateTitleMutation.mutate(params);
-                          } else {
-                            setIsEditingTitle(false);
-                          }
-                        }}
-                        hitSlop={8}
-                        disabled={updateTitleMutation.isPending}
-                      >
-                        {updateTitleMutation.isPending ? (
-                          <ActivityIndicator color="#4ade80" size="small" />
-                        ) : (
-                          <Ionicons name="checkmark" size={18} color="#4ade80" />
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => setIsEditingTitle(false)}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="close" size={18} color="#64748b" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : (
-                  <>
-                    <Text style={[styles.titleText, { flex: 1 }]}>{title.title}</Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setEditTitle(title.title);
-                        setEditAuthor(title.author ?? "");
-                        setIsEditingTitle(true);
-                      }}
-                      hitSlop={8}
-                    >
-                      <Ionicons name="pencil" size={16} color="#94a3b8" />
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
-              {!isEditingTitle && (
-                <Text style={styles.metaText}>
-                  {title.author ?? "著者不明"}
-                </Text>
-              )}
-              <View style={styles.pluginRow}>
-                <View style={[styles.pluginBadge, { backgroundColor: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).bg }]}>
-                  <Text style={[styles.pluginBadgeText, { color: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).text }]}>{SOURCE_LABELS[title.pluginId] ?? title.pluginId}</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => {
-                    const url = getExternalUrl(title.pluginId, title.titleId);
-                    if (url) {
-                      Platform.OS === "web" ? Linking.openURL(url) : WebBrowser.openBrowserAsync(url);
-                    }
-                  }}
-                  hitSlop={8}
-                  style={styles.sourceLinkBtn}
-                >
-                  <Ionicons name="open-outline" size={13} color="#60a5fa" />
-                </TouchableOpacity>
-              </View>
+  const isWeb = Platform.OS === "web";
 
-              <View style={styles.titleActions}>
-                <TouchableOpacity
-                  style={styles.syncBtn}
-                  onPress={() => syncMutation.mutate(undefined)}
-                  disabled={syncMutation.isPending}
-                >
-                  {syncMutation.isPending ? (
-                    <ActivityIndicator color="#60a5fa" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="sync" size={14} color="#60a5fa" />
-                      <Text style={styles.syncBtnText}>同期</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() =>
-                    confirmAction(
-                      "タイトルを削除",
-                      `「${title.title}」をライブラリから削除しますか？`,
-                      () => deleteMutation.mutate()
-                    )
+  const renderTitleInfo = () => (
+    <>
+      {isEditingTitle ? (
+        <View style={styles.titleTextRow}>
+          <View style={styles.editFieldsContainer}>
+            <View style={styles.editTitleRow}>
+              <TextInput
+                style={[styles.editTitleInput, isWeb && { outlineStyle: "none" } as any]}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                autoFocus
+                selectTextOnFocus
+                placeholder="タイトル"
+                placeholderTextColor={colors.textDim}
+              />
+            </View>
+            <View style={styles.editTitleRow}>
+              <TextInput
+                style={[styles.editAuthorInput, isWeb && { outlineStyle: "none" } as any]}
+                value={editAuthor}
+                onChangeText={setEditAuthor}
+                placeholder="著者"
+                placeholderTextColor={colors.textDim}
+              />
+            </View>
+            <View style={styles.editButtonRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  const trimmedTitle = editTitle.trim();
+                  const trimmedAuthor = editAuthor.trim();
+                  const params: { title?: string; author?: string } = {};
+                  if (trimmedTitle && trimmedTitle !== title.title) params.title = trimmedTitle;
+                  if (trimmedAuthor !== (title.author ?? "")) params.author = trimmedAuthor;
+                  if (Object.keys(params).length > 0) {
+                    updateTitleMutation.mutate(params);
+                  } else {
+                    setIsEditingTitle(false);
                   }
-                  hitSlop={8}
-                  style={styles.deleteBtn}
-                >
-                  <Ionicons name="trash-outline" size={14} color="#64748b" />
-                </TouchableOpacity>
-              </View>
+                }}
+                hitSlop={8}
+                disabled={updateTitleMutation.isPending}
+              >
+                {updateTitleMutation.isPending ? (
+                  <ActivityIndicator color={colors.success} size="small" />
+                ) : (
+                  <Ionicons name="checkmark" size={18} color={colors.success} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setIsEditingTitle(false)} hitSlop={8}>
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
             </View>
           </View>
         </View>
+      ) : (
+        <>
+          <Text style={styles.titleText}>{title.title}</Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>{title.author ?? "著者不明"}</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setEditTitle(title.title);
+                setEditAuthor(title.author ?? "");
+                setIsEditingTitle(true);
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="pencil-outline" size={13} color="rgba(255,255,255,0.3)" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={[styles.pluginBadge, { backgroundColor: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).bg, alignSelf: "flex-start", marginTop: 6 }]}
+            onPress={() => {
+              const extUrl = getExternalUrl(title.pluginId, title.titleId);
+              if (extUrl) {
+                isWeb ? Linking.openURL(extUrl) : WebBrowser.openBrowserAsync(extUrl);
+              }
+            }}
+          >
+            <Text style={[styles.pluginBadgeText, { color: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).text }]}>
+              {SOURCE_LABELS[title.pluginId] ?? title.pluginId}
+            </Text>
+            <Ionicons name="open-outline" size={11} color={(SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).text} />
+          </TouchableOpacity>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.heroActionBtnWide}
+              onPress={() =>
+                confirmAction(
+                  "購入状態を同期",
+                  `全巻の購入状態をサイトと同期しますか？`,
+                  () => syncMutation.mutate(undefined)
+                )
+              }
+              disabled={syncMutation.isPending}
+            >
+              {syncMutation.isPending ? (
+                <ActivityIndicator color={colors.accentLight} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="sync" size={18} color={colors.accentLight} />
+                  <Text style={styles.heroActionBtnText}>同期</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.heroActionBtn}
+              onPress={() =>
+                confirmAction(
+                  "タイトルを削除",
+                  `「${title.title}」をライブラリから削除しますか？`,
+                  () => deleteMutation.mutate()
+                )
+              }
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+    </>
+  );
 
+  return (
+    <View style={styles.wrapper}>
+      {/* Hide default Stack header — we render our own back button */}
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Hero header — full-bleed on all platforms */}
+      <View style={styles.heroSection}>
+        {title.coverUrl ? (
+          <ImageBackground
+            source={{ uri: title.coverUrl }}
+            style={styles.heroBg}
+            blurRadius={isWeb ? 30 : 0}
+            resizeMode="cover"
+          >
+            {!isWeb ? (
+              <BlurView intensity={80} tint="dark" style={styles.heroOverlay}>
+                <LinearGradient
+                  colors={["transparent", "rgba(10,15,26,0.4)", colors.bg]}
+                  locations={[0, 0.5, 1]}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              </BlurView>
+            ) : (
+              <View style={[styles.heroOverlay, { backgroundColor: "rgba(10,15,26,0.65)" }]}>
+                <LinearGradient
+                  colors={["transparent", colors.bg]}
+                  style={styles.heroGradient}
+                />
+              </View>
+            )}
+          </ImageBackground>
+        ) : (
+          <LinearGradient
+            colors={["#1a1a2e", "#16213e", colors.bg]}
+            style={styles.heroBgFallback}
+          />
+        )}
+
+        {/* Back button overlay (mobile only) */}
+        {!isWeb && (
+          <TouchableOpacity
+            style={[styles.heroBackBtn, { top: insets.top }]}
+            onPress={() => router.canGoBack() ? router.back() : router.replace("/")}
+            hitSlop={8}
+          >
+            <Ionicons name="chevron-back" size={28} color={colors.white} />
+          </TouchableOpacity>
+        )}
+
+        <View style={[styles.heroContent, { paddingTop: insets.top + (isWeb ? 16 : 54) }]}>
+          {title.coverUrl && (
+            <TouchableOpacity onPress={() => setPreviewImage(title.coverUrl!)} activeOpacity={0.8}>
+              <View style={styles.heroCoverWrap}>
+                <Image source={{ uri: title.coverUrl }} style={styles.heroCover} />
+              </View>
+            </TouchableOpacity>
+          )}
+          <View style={styles.heroInfo}>
+            {renderTitleInfo()}
+          </View>
+        </View>
+      </View>
+
+      {/* Content below hero */}
+      <View style={styles.contentArea}>
         {/* Genre tags (shown for both standalone and series) */}
         {((title.displayGenres ?? title.genres).length > 0) && (
-          <View style={styles.saTagRow}>
+          <View style={[styles.saTagRow, styles.contentPadding]}>
             {(title.displayGenres ?? title.genres).map((tag) => (
               <View key={tag} style={styles.saTag}>
                 <Text style={styles.saTagText}>{tag}</Text>
@@ -503,9 +561,9 @@ export default function TitleDetailScreen() {
           </View>
         )}
 
-        {/* Standalone: status + actions */}
+        {/* Standalone: status + actions (in ScrollView since content is short) */}
         {isStandalone && saVol && (
-          <>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentPadding}>
 
             <View style={styles.saStatusCard}>
               <View style={[styles.listStatusBadge, { backgroundColor: saCfg.bg, alignSelf: "flex-start" }]}>
@@ -525,17 +583,17 @@ export default function TitleDetailScreen() {
               )}
               {saVol.status === "downloading" && (saVol.jobProgress == null || saVol.jobProgress === 0) && saVol.jobMessage && /^\d+$/.test(saVol.jobMessage) && (
                 <View style={styles.volPageCountRow}>
-                  <Ionicons name="documents-outline" size={12} color="#60a5fa" />
+                  <Ionicons name="documents-outline" size={12} color={colors.accentLight} />
                   <Text style={styles.volPageCountText}>{saVol.jobMessage}ページ DL済</Text>
                 </View>
               )}
 
               {saVol.status === "done" && saVol.filePath && (
                 <View style={styles.filePathRow}>
-                  <Ionicons name="folder-outline" size={12} color="#64748b" style={{ marginTop: 2 }} />
+                  <Ionicons name="folder-outline" size={12} color={colors.textMuted} style={{ marginTop: 2 }} />
                   <Text style={styles.saFilePath} numberOfLines={2} selectable>{saVol.filePath}</Text>
                   <TouchableOpacity onPress={() => copyToClipboard(saVol.filePath!)} hitSlop={8} style={styles.copyBtn}>
-                    <Ionicons name="copy-outline" size={13} color="#64748b" />
+                    <Ionicons name="copy-outline" size={13} color={colors.textMuted} />
                   </TouchableOpacity>
                 </View>
               )}
@@ -550,16 +608,16 @@ export default function TitleDetailScreen() {
             <View style={styles.saActions}>
               {(saVol.status === "available" || saVol.status === "done") && (
                 <TouchableOpacity
-                  style={styles.actionBtnPrimary}
+                  style={styles.saActionBtn}
                   onPress={() => downloadMutation.mutate({ vols: [1] })}
                   disabled={saIsBusy}
                 >
                   {downloadMutation.isPending ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                    <ActivityIndicator color={colors.accentLight} size="small" />
                   ) : (
                     <>
-                      <Ionicons name="cloud-download" size={16} color="#fff" />
-                      <Text style={styles.actionBtnPrimaryText}>
+                      <Ionicons name="cloud-download" size={18} color={colors.accentLight} />
+                      <Text style={styles.saActionBtnText}>
                         {saVol.status === "done" ? "再ダウンロード" : "ダウンロード"}
                       </Text>
                     </>
@@ -568,36 +626,38 @@ export default function TitleDetailScreen() {
               )}
               {saVol.status === "error" && (
                 <TouchableOpacity
-                  style={styles.actionBtnPrimary}
+                  style={styles.saActionBtn}
                   onPress={() => downloadMutation.mutate({ vols: [1] })}
                   disabled={saIsBusy}
                 >
                   {downloadMutation.isPending ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                    <ActivityIndicator color={colors.accentLight} size="small" />
                   ) : (
                     <>
-                      <Ionicons name="refresh" size={16} color="#fff" />
-                      <Text style={styles.actionBtnPrimaryText}>再試行</Text>
+                      <Ionicons name="refresh" size={18} color={colors.accentLight} />
+                      <Text style={styles.saActionBtnText}>再試行</Text>
                     </>
                   )}
                 </TouchableOpacity>
               )}
             </View>
-          </>
+          </ScrollView>
         )}
 
+        {/* Series controls (fixed, not scrollable) */}
+        {!isStandalone && (<>
         {/* Series: Error retry banner */}
-        {!isStandalone && counts.other > 0 && volumes.some((v) => v.status === "error") && (
+        {counts.other > 0 && volumes.some((v) => v.status === "error") && (
           <TouchableOpacity
-            style={styles.retryBanner}
+            style={[styles.retryBanner, { marginHorizontal: 16 }]}
             onPress={() => downloadMutation.mutate({ vols: "error", unit: hasBothUnits ? activeUnit : undefined })}
             disabled={downloadMutation.isPending}
           >
             {downloadMutation.isPending ? (
-              <ActivityIndicator color="#f87171" size="small" />
+              <ActivityIndicator color={colors.error} size="small" />
             ) : (
               <>
-                <Ionicons name="refresh" size={14} color="#f87171" />
+                <Ionicons name="refresh" size={14} color={colors.error} />
                 <Text style={styles.retryBannerText}>
                   エラー {volumes.filter((v) => v.status === "error").length}{activeUnit === "ep" ? "話" : "巻"}を再試行
                 </Text>
@@ -607,30 +667,31 @@ export default function TitleDetailScreen() {
         )}
 
         {/* Series: Unit tabs (話読み / 巻読み) */}
-        {!isStandalone && hasBothUnits && (
-          <View style={styles.unitTabRow}>
-            <TouchableOpacity
-              style={[styles.unitTab, activeUnit === "ep" && styles.unitTabActive]}
-              onPress={() => switchUnitTab("ep")}
-            >
-              <Text style={[styles.unitTabText, activeUnit === "ep" && styles.unitTabTextActive]}>
-                話読み {allVolumes.filter((v) => (v.unit ?? "vol") === "ep").length}話
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.unitTab, activeUnit === "vol" && styles.unitTabActive]}
-              onPress={() => switchUnitTab("vol")}
-            >
-              <Text style={[styles.unitTabText, activeUnit === "vol" && styles.unitTabTextActive]}>
-                巻読み {allVolumes.filter((v) => (v.unit ?? "vol") === "vol").length}巻
-              </Text>
-            </TouchableOpacity>
+        {hasBothUnits && (
+          <View style={styles.contentPadding}>
+            <View style={styles.unitTabRow}>
+              <TouchableOpacity
+                style={[styles.unitTab, activeUnit === "ep" && styles.unitTabActive]}
+                onPress={() => switchUnitTab("ep")}
+              >
+                <Text style={[styles.unitTabText, activeUnit === "ep" && styles.unitTabTextActive]}>
+                  話読み {allVolumes.filter((v) => (v.unit ?? "vol") === "ep").length}話
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.unitTab, activeUnit === "vol" && styles.unitTabActive]}
+                onPress={() => switchUnitTab("vol")}
+              >
+                <Text style={[styles.unitTabText, activeUnit === "vol" && styles.unitTabTextActive]}>
+                  巻読み {allVolumes.filter((v) => (v.unit ?? "vol") === "vol").length}巻
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
         {/* Series: Filter chips + select all */}
-        {!isStandalone && (<>
-        <View style={styles.filterSection}>
+        <View style={[styles.filterSection, styles.contentPadding]}>
           <TouchableOpacity
             style={styles.selectAllBtn}
             onPress={toggleSelectAll}
@@ -638,9 +699,9 @@ export default function TitleDetailScreen() {
             <Ionicons
               name={allFilteredSelected ? "checkbox" : "square-outline"}
               size={16}
-              color={allFilteredSelected ? "#60a5fa" : "#64748b"}
+              color={allFilteredSelected ? colors.accentLight : colors.textMuted}
             />
-            <Text style={[styles.selectAllText, allFilteredSelected && { color: "#60a5fa" }]}>
+            <Text style={[styles.selectAllText, allFilteredSelected && { color: colors.accentLight }]}>
               全選択
             </Text>
           </TouchableOpacity>
@@ -669,120 +730,118 @@ export default function TitleDetailScreen() {
           </View>
         </View>
 
-        {/* Volume list */}
-        {filteredVolumes.map((vol) => {
-          const cfg = STATUS_CONFIG[vol.status] ?? STATUS_CONFIG.unknown;
-          const isSelected = selected.has(vol.volumeNum);
+        {/* Series: Volume list (scrollable) */}
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.contentPadding, { paddingBottom: selected.size > 0 ? 80 : 40 }]}>
+          {filteredVolumes.map((vol) => {
+            const cfg = STATUS_CONFIG[vol.status] ?? STATUS_CONFIG.unknown;
+            const isSelected = selected.has(vol.volumeNum);
 
-          return (
-            <TouchableOpacity
-              key={vol.id}
-              style={[styles.listRow, isSelected && styles.listRowSelected]}
-              onPress={() => toggleSelect(vol.volumeNum)}
-              activeOpacity={0.7}
-            >
-              {/* Checkbox */}
-              <View style={styles.listCheckbox}>
-                <Ionicons
-                  name={isSelected ? "checkbox" : "square-outline"}
-                  size={18}
-                  color={isSelected ? "#60a5fa" : "#475569"}
-                />
-              </View>
-
-              {/* Thumbnail */}
-              {(vol.thumbnailUrl || epThumbFallback.has(vol.volumeNum)) ? (
-                <TouchableOpacity onPress={() => setPreviewImage((vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))!)} activeOpacity={0.8}>
-                  <Image source={{ uri: (vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))! }} style={styles.listThumb} />
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.listThumbFallback}>
-                  <Text style={styles.listThumbNum}>
-                    {vol.volumeNum}
-                  </Text>
+            return (
+              <TouchableOpacity
+                key={vol.id}
+                style={[styles.listRow, isSelected && styles.listRowSelected]}
+                onPress={() => toggleSelect(vol.volumeNum)}
+                activeOpacity={0.7}
+              >
+                {/* Checkbox */}
+                <View style={styles.listCheckbox}>
+                  <Ionicons
+                    name={isSelected ? "checkbox" : "square-outline"}
+                    size={18}
+                    color={isSelected ? colors.accentLight : colors.textDim}
+                  />
                 </View>
-              )}
 
-              {/* Main content */}
-              <View style={styles.listMain}>
-                {/* Top row: volume label + status */}
-                <View style={styles.listTopRow}>
-                  <Text style={styles.listVolNum}>第{vol.volumeNum}{(vol.unit ?? "vol") === "ep" ? "話" : "巻"}</Text>
-                  <View style={[styles.listStatusBadge, { backgroundColor: cfg.bg }]}>
-                    <Ionicons name={cfg.icon} size={10} color={cfg.fg} />
-                    <Text style={[styles.listStatusText, { color: cfg.fg }]}>
-                      {cfg.label}
+                {/* Thumbnail */}
+                {(vol.thumbnailUrl || epThumbFallback.has(vol.volumeNum)) ? (
+                  <TouchableOpacity onPress={() => setPreviewImage((vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))!)} activeOpacity={0.8}>
+                    <Image source={{ uri: (vol.thumbnailUrl ?? epThumbFallback.get(vol.volumeNum))! }} style={styles.listThumb} />
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.listThumbFallback}>
+                    <Text style={styles.listThumbNum}>
+                      {vol.volumeNum}
                     </Text>
                   </View>
-                </View>
+                )}
 
-                {/* Download progress */}
-                {vol.status === "downloading" && vol.jobProgress != null && vol.jobProgress > 0 && (
-                  <View style={styles.volProgressRow}>
-                    <View style={styles.volProgressBar}>
-                      <View style={[styles.volProgressFill, { width: `${Math.round(vol.jobProgress * 100)}%` }]} />
+                {/* Main content */}
+                <View style={styles.listMain}>
+                  {/* Top row: volume label + status */}
+                  <View style={styles.listTopRow}>
+                    <Text style={styles.listVolNum}>第{vol.volumeNum}{(vol.unit ?? "vol") === "ep" ? "話" : "巻"}</Text>
+                    <View style={[styles.listStatusBadge, { backgroundColor: cfg.bg }]}>
+                      <Ionicons name={cfg.icon} size={10} color={cfg.fg} />
+                      <Text style={[styles.listStatusText, { color: cfg.fg }]}>
+                        {cfg.label}
+                      </Text>
                     </View>
-                    <Text style={styles.volProgressText}>{Math.round(vol.jobProgress * 100)}%</Text>
                   </View>
-                )}
-                {vol.status === "downloading" && (vol.jobProgress == null || vol.jobProgress === 0) && vol.jobMessage && /^\d+$/.test(vol.jobMessage) && (
-                  <View style={styles.volPageCountRow}>
-                    <Ionicons name="documents-outline" size={11} color="#60a5fa" />
-                    <Text style={styles.volPageCountText}>{vol.jobMessage}ページ DL済</Text>
-                  </View>
-                )}
 
-                {/* File path */}
-                {vol.status === "done" && vol.filePath && (
-                  <View style={styles.filePathRow}>
-                    <Ionicons name="folder-outline" size={11} color="#64748b" style={{ marginTop: 1 }} />
-                    <Text style={styles.listFilePath} numberOfLines={2} selectable>
-                      {vol.filePath}
-                    </Text>
-                    <TouchableOpacity onPress={() => copyToClipboard(vol.filePath!)} hitSlop={8} style={styles.copyBtn}>
-                      <Ionicons name="copy-outline" size={12} color="#64748b" />
-                    </TouchableOpacity>
-                  </View>
-                )}
+                  {/* Download progress */}
+                  {vol.status === "downloading" && vol.jobProgress != null && vol.jobProgress > 0 && (
+                    <View style={styles.volProgressRow}>
+                      <View style={styles.volProgressBar}>
+                        <View style={[styles.volProgressFill, { width: `${Math.round(vol.jobProgress * 100)}%` }]} />
+                      </View>
+                      <Text style={styles.volProgressText}>{Math.round(vol.jobProgress * 100)}%</Text>
+                    </View>
+                  )}
+                  {vol.status === "downloading" && (vol.jobProgress == null || vol.jobProgress === 0) && vol.jobMessage && /^\d+$/.test(vol.jobMessage) && (
+                    <View style={styles.volPageCountRow}>
+                      <Ionicons name="documents-outline" size={11} color={colors.accentLight} />
+                      <Text style={styles.volPageCountText}>{vol.jobMessage}ページ DL済</Text>
+                    </View>
+                  )}
 
-                {/* Meta row */}
-                <View style={styles.listMeta}>
-                  {vol.pageCount != null && (
-                    <Text style={styles.listMetaItem}>{vol.pageCount}p</Text>
+                  {/* File path */}
+                  {vol.status === "done" && vol.filePath && (
+                    <View style={styles.filePathRow}>
+                      <Ionicons name="folder-outline" size={11} color={colors.textMuted} style={{ marginTop: 1 }} />
+                      <Text style={styles.listFilePath} numberOfLines={2} selectable>
+                        {vol.filePath}
+                      </Text>
+                      <TouchableOpacity onPress={() => copyToClipboard(vol.filePath!)} hitSlop={8} style={styles.copyBtn}>
+                        <Ionicons name="copy-outline" size={12} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
                   )}
-                  {vol.downloadedAt && (
-                    <Text style={styles.listMetaItem}>
-                      {formatDate(vol.downloadedAt)}
-                    </Text>
-                  )}
-                  {vol.availabilityReason && vol.status !== "done" && (
-                    <Text style={[
-                      styles.listMetaReason,
-                      vol.availabilityReason === "free" && !isFreeExpired(vol.freeUntil) && styles.listMetaFree,
-                      vol.availabilityReason === "free" && isFreeExpired(vol.freeUntil) && styles.listMetaExpired,
-                    ]} numberOfLines={1}>
-                      {vol.availabilityReason === "free" && vol.freeUntil
-                        ? (isFreeExpired(vol.freeUntil) ? `無料期間終了 (${formatFreeUntil(vol.freeUntil)})` : formatFreeUntil(vol.freeUntil))
-                        : (REASON_LABELS[vol.availabilityReason] ?? vol.availabilityReason)}
-                    </Text>
-                  )}
+
+                  {/* Meta row */}
+                  <View style={styles.listMeta}>
+                    {vol.pageCount != null && (
+                      <Text style={styles.listMetaItem}>{vol.pageCount}p</Text>
+                    )}
+                    {vol.downloadedAt && (
+                      <Text style={styles.listMetaItem}>
+                        {formatDate(vol.downloadedAt)}
+                      </Text>
+                    )}
+                    {vol.availabilityReason && vol.status !== "done" && (
+                      <Text style={[
+                        styles.listMetaReason,
+                        vol.availabilityReason === "free" && !isFreeExpired(vol.freeUntil) && styles.listMetaFree,
+                        vol.availabilityReason === "free" && isFreeExpired(vol.freeUntil) && styles.listMetaExpired,
+                      ]} numberOfLines={1}>
+                        {vol.availabilityReason === "free" && vol.freeUntil
+                          ? (isFreeExpired(vol.freeUntil) ? `無料期間終了 (${formatFreeUntil(vol.freeUntil)})` : formatFreeUntil(vol.freeUntil))
+                          : (REASON_LABELS[vol.availabilityReason] ?? vol.availabilityReason)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+              </TouchableOpacity>
+            );
+          })}
 
-        {filteredVolumes.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>該当する巻がありません</Text>
-          </View>
-        )}
-
-        {/* Bottom padding for selection bar */}
-        <View style={{ height: selected.size > 0 ? 80 : 40 }} />
+          {filteredVolumes.length === 0 && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>該当する巻がありません</Text>
+            </View>
+          )}
+        </ScrollView>
         </>)}
-
-      </ScrollView>
+      </View>
 
       {/* Image preview modal */}
       <Modal
@@ -813,22 +872,32 @@ export default function TitleDetailScreen() {
         const retryable = selectedVols.filter((v) => v.status === "error");
         const deletable = selectedVols.filter((v) => v.status === "done");
         const isBusy = syncMutation.isPending || downloadMutation.isPending || deleteVolumesMutation.isPending;
+        const unitLabel = activeUnit === "ep" ? "話" : "巻";
         return (
           <View style={styles.selectionBar}>
-            <Text style={styles.selectionText}>{selected.size}{activeUnit === "ep" ? "話" : "巻"}を選択中</Text>
+            <View style={styles.selectionBadge}>
+              <Text style={styles.selectionBadgeText}>{selected.size}</Text>
+            </View>
+
             <View style={styles.selectionActions}>
-              {/* Sync - always available */}
+              {/* Sync */}
               <TouchableOpacity
-                style={styles.actionBtn}
-                onPress={() => syncMutation.mutate(Array.from(selected))}
+                style={styles.selBarBtn}
+                onPress={() =>
+                  confirmAction(
+                    "購入状態を同期",
+                    `選択した${selected.size}${unitLabel}の購入状態をサイトと同期しますか？`,
+                    () => syncMutation.mutate(Array.from(selected))
+                  )
+                }
                 disabled={isBusy}
               >
                 {syncMutation.isPending ? (
-                  <ActivityIndicator color="#60a5fa" size="small" />
+                  <ActivityIndicator color={colors.accentLight} size="small" />
                 ) : (
                   <>
-                    <Ionicons name="sync" size={15} color="#60a5fa" />
-                    <Text style={styles.actionBtnText}>同期</Text>
+                    <Ionicons name="sync" size={18} color={colors.accentLight} />
+                    <Text style={styles.selBarBtnText}>同期</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -836,16 +905,16 @@ export default function TitleDetailScreen() {
               {/* Download */}
               {downloadable.length > 0 && (
                 <TouchableOpacity
-                  style={styles.actionBtnPrimary}
+                  style={styles.selBarBtn}
                   onPress={() => downloadMutation.mutate({ vols: Array.from(selected), unit: hasBothUnits ? activeUnit : undefined })}
                   disabled={isBusy}
                 >
                   {downloadMutation.isPending ? (
-                    <ActivityIndicator color="#fff" size="small" />
+                    <ActivityIndicator color={colors.accentLight} size="small" />
                   ) : (
                     <>
-                      <Ionicons name="cloud-download" size={15} color="#fff" />
-                      <Text style={styles.actionBtnPrimaryText}>ダウンロード</Text>
+                      <Ionicons name="cloud-download" size={18} color={colors.accentLight} />
+                      <Text style={styles.selBarBtnText}>ダウンロード</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -854,23 +923,20 @@ export default function TitleDetailScreen() {
               {/* Delete files */}
               {deletable.length > 0 && (
                 <TouchableOpacity
-                  style={styles.actionBtnDanger}
+                  style={styles.heroActionBtn}
                   onPress={() =>
                     confirmAction(
                       "ファイルを削除",
-                      `${deletable.length}巻のダウンロード済みファイルを削除しますか？`,
+                      `${deletable.length}${unitLabel}のダウンロード済みファイルを削除しますか？`,
                       () => deleteVolumesMutation.mutate(deletable.map((v) => v.volumeNum))
                     )
                   }
                   disabled={isBusy}
                 >
                   {deleteVolumesMutation.isPending ? (
-                    <ActivityIndicator color="#f87171" size="small" />
+                    <ActivityIndicator color={colors.textMuted} size="small" />
                   ) : (
-                    <>
-                      <Ionicons name="trash" size={15} color="#f87171" />
-                      <Text style={styles.actionBtnDangerText}>削除</Text>
-                    </>
+                    <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
                   )}
                 </TouchableOpacity>
               )}
@@ -883,20 +949,60 @@ export default function TitleDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrapper: { flex: 1, backgroundColor: "#0f172a" },
-  container: { flex: 1 },
-  content: { padding: 16 },
+  wrapper: { flex: 1, backgroundColor: colors.bg },
+  contentArea: { flex: 1 },
+  contentPadding: { paddingHorizontal: 16 },
 
-  // Title section
-  titleSection: { marginBottom: 16 },
-  titleRow: { flexDirection: "row", gap: 14 },
-  coverImage: {
-    width: 72,
-    height: 100,
-    borderRadius: 6,
-    backgroundColor: "#0f172a",
+  // Hero section — full-bleed, extends behind status bar
+  heroSection: {
+    position: "relative",
+    marginBottom: 8,
+    paddingBottom: 16,
   },
-  titleInfo: { flex: 1 },
+  heroBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroBgFallback: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+  },
+  heroBackBtn: {
+    position: "absolute",
+    left: 14,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroContent: {
+    flexDirection: "row",
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  heroCoverWrap: {
+    ...coverShadow,
+    borderRadius: radius.sm,
+    overflow: "hidden",
+  },
+  heroCover: {
+    width: 100,
+    height: 142,
+    borderRadius: radius.sm,
+  },
+  heroInfo: { flex: 1, paddingTop: 0 },
   titleTextRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, flex: 1 },
   editFieldsContainer: {
     flex: 1,
@@ -915,70 +1021,73 @@ const styles = StyleSheet.create({
   },
   editTitleInput: {
     flex: 1,
-    color: "#f1f5f9",
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: "700",
-    backgroundColor: "#1e293b",
-    borderRadius: 6,
+    backgroundColor: "rgba(30,41,59,0.8)",
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: colors.borderLight,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   editAuthorInput: {
     flex: 1,
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 13,
-    backgroundColor: "#1e293b",
-    borderRadius: 6,
+    backgroundColor: "rgba(30,41,59,0.8)",
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: colors.borderLight,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  sourceLinkBtn: { padding: 2 },
-  titleText: { color: "#f1f5f9", fontSize: 20, fontWeight: "700" },
-  metaText: { color: "#94a3b8", fontSize: 13, marginTop: 4 },
-  pluginRow: {
+  titleText: { color: colors.textPrimary, fontSize: 19, fontWeight: "800", letterSpacing: -0.3, lineHeight: 24 },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  metaText: { color: colors.textSecondary, fontSize: 13 },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: "auto",
+    paddingTop: 10,
+    flexWrap: "wrap",
+  },
+  heroActionBtn: {
+    padding: 8,
+    borderRadius: radius.sm,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  heroActionBtnWide: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 4,
-  },
-  pluginBadge: {
-    backgroundColor: "#334155",
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  pluginBadgeText: { color: "#94a3b8", fontSize: 10, fontWeight: "600" },
-  // Title actions
-  titleActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 10,
-  },
-  syncBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#1e293b",
-    borderRadius: 6,
+    padding: 8,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: radius.sm,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  syncBtnText: { color: "#60a5fa", fontSize: 13, fontWeight: "600" },
-  deleteBtn: { padding: 6 },
+  heroActionBtnText: { color: colors.accentLight, fontSize: 13, fontWeight: "600" },
+  pluginBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pluginBadgeText: { fontSize: 11, fontWeight: "600" },
 
   // Unit tabs
   unitTabRow: {
     flexDirection: "row",
     gap: 0,
     marginBottom: 12,
-    backgroundColor: "#1e293b",
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   unitTab: {
     flex: 1,
@@ -986,15 +1095,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   unitTabActive: {
-    backgroundColor: "#334155",
+    backgroundColor: colors.accentDim,
   },
   unitTabText: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 13,
     fontWeight: "600",
   },
   unitTabTextActive: {
-    color: "#e2e8f0",
+    color: colors.textPrimary,
   },
 
   // Filter section
@@ -1013,19 +1122,22 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 14,
-    backgroundColor: "#1e293b",
+    borderRadius: radius.xl,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   filterChipActive: {
-    backgroundColor: "#334155",
+    backgroundColor: colors.accentDim,
+    borderColor: "rgba(59,130,246,0.3)",
   },
   filterChipText: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   filterChipTextActive: {
-    color: "#e2e8f0",
+    color: colors.textPrimary,
   },
   selectAllBtn: {
     flexDirection: "row",
@@ -1035,7 +1147,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   selectAllText: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1044,13 +1156,14 @@ const styles = StyleSheet.create({
   listRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     borderBottomWidth: 1,
-    borderBottomColor: "#1e293b",
+    borderBottomColor: colors.border,
   },
   listRowSelected: {
-    backgroundColor: "#172554",
+    backgroundColor: colors.infoBg,
+    borderRadius: radius.sm,
   },
   listCheckbox: {
     width: 32,
@@ -1060,7 +1173,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 50,
     borderRadius: 4,
-    backgroundColor: "#1e293b",
+    backgroundColor: colors.bgElevated,
   },
   listThumbFallback: {
     width: 36,
@@ -1068,12 +1181,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1e293b",
+    backgroundColor: colors.bgElevated,
   },
   listThumbNum: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#64748b",
+    color: colors.textMuted,
   },
   listMain: {
     flex: 1,
@@ -1086,7 +1199,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   listVolNum: {
-    color: "#e2e8f0",
+    color: colors.textLight,
     fontSize: 14,
     fontWeight: "700",
   },
@@ -1113,7 +1226,7 @@ const styles = StyleSheet.create({
   },
   listFilePath: {
     flex: 1,
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 11,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
@@ -1123,19 +1236,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   listMetaItem: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 11,
   },
   listMetaReason: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 11,
     flex: 1,
   },
   listMetaFree: {
-    color: "#4ade80",
+    color: colors.success,
   },
   listMetaExpired: {
-    color: "#f87171",
+    color: colors.error,
   },
 
   // Volume progress
@@ -1148,17 +1261,17 @@ const styles = StyleSheet.create({
   volProgressBar: {
     flex: 1,
     height: 3,
-    backgroundColor: "#334155",
+    backgroundColor: colors.borderAccent,
     borderRadius: 2,
     overflow: "hidden",
   },
   volProgressFill: {
     height: "100%",
-    backgroundColor: "#3b82f6",
+    backgroundColor: colors.accent,
     borderRadius: 2,
   },
   volProgressText: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 10,
     fontWeight: "600",
     width: 28,
@@ -1171,7 +1284,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   volPageCountText: {
-    color: "#60a5fa",
+    color: colors.accentLight,
     fontSize: 10,
     fontWeight: "600",
   },
@@ -1182,7 +1295,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   emptyText: {
-    color: "#475569",
+    color: colors.textDim,
     fontSize: 13,
   },
 
@@ -1194,50 +1307,36 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#172554",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: Platform.OS === "ios" ? 28 : 12,
+    gap: 12,
+    backgroundColor: colors.bgCard,
+    paddingLeft: 20,
+    paddingRight: 24,
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === "ios" ? 28 : 10,
     borderTopWidth: 1,
-    borderTopColor: "#1e3a5f",
+    borderTopColor: colors.borderLight,
   },
-  selectionText: { color: "#93c5fd", fontSize: 14, fontWeight: "600" },
-  selectionActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  actionBtn: {
+  selectionBadge: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.full,
+    minWidth: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  selectionBadgeText: { color: colors.white, fontSize: 13, fontWeight: "700" },
+  selectionActions: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 12 },
+  selBarBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: "#1e293b",
-    borderWidth: 1,
-    borderColor: "#334155",
-    borderRadius: 8,
+    gap: 6,
+    padding: 8,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: radius.sm,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  actionBtnText: { color: "#60a5fa", fontSize: 13, fontWeight: "600" },
-  actionBtnPrimary: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#2563eb",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  actionBtnPrimaryText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  actionBtnDanger: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#1e293b",
-    borderWidth: 1,
-    borderColor: "#451a1a",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  actionBtnDangerText: { color: "#f87171", fontSize: 13, fontWeight: "600" },
+  selBarBtnText: { color: colors.accentLight, fontSize: 13, fontWeight: "600" },
 
   // Retry banner
   retryBanner: {
@@ -1245,14 +1344,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: "#450a0a",
+    backgroundColor: colors.errorBg,
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginBottom: 10,
   },
   retryBannerText: {
-    color: "#f87171",
+    color: colors.error,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -1262,25 +1361,29 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: 10,
+    marginTop: 4,
     marginBottom: 6,
   },
   saTag: {
-    backgroundColor: "#1e293b",
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.xl,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   saTagText: {
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 11,
   },
   saStatusCard: {
-    backgroundColor: "#1e293b",
-    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
     padding: 14,
-    marginTop: 16,
+    marginTop: 12,
     gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   saStatusRow: {
     flexDirection: "row",
@@ -1289,12 +1392,12 @@ const styles = StyleSheet.create({
   },
   saFilePath: {
     flex: 1,
-    color: "#94a3b8",
+    color: colors.textSecondary,
     fontSize: 11,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   saMetaItem: {
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 12,
   },
   // Image preview modal
@@ -1315,4 +1418,14 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 16,
   },
+  saActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    padding: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.sm,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  saActionBtnText: { color: colors.accentLight, fontSize: 14, fontWeight: "600" },
 });
