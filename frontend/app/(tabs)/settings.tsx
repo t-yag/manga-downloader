@@ -50,7 +50,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
-      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/[{author}] {title}_{unit}{volume} - ({tags})");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})");
     }
   }, [settings]);
 
@@ -245,8 +245,10 @@ export default function SettingsScreen() {
             {[
               ["{plugin}", "データソースID（例: cmoa, piccoma）"],
               ["{title}", "作品タイトル"],
-              ["{unit}", "巻・話の種別（例: vol, ep）"],
-              ["{volume}", "巻・話の番号（3桁ゼロ埋め、例: 001, 012）"],
+              ["{unit}", "巻・話の種別（vol, ep）"],
+              ["{unit_ja}", "日本語の種別（巻, 話）"],
+              ["{volume}", "巻・話の番号（例: 1, 12）"],
+              ["{volume:N}", "N桁ゼロ埋め（例: {volume:2}→01, {volume:3}→001）"],
               ["{author}", "著者名"],
               ["{tags}", "タグを半角スペースで結合（例: タグ1 タグ2）"],
               ["{tags_comma}", "タグをカンマ区切り（例: タグ1,タグ2）"],
@@ -262,7 +264,7 @@ export default function SettingsScreen() {
           style={styles.input}
           value={pathTemplate}
           onChangeText={setPathTemplate}
-          placeholder="{title}/[{author}] {title}_{unit}{volume} - ({tags})"
+          placeholder="{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})"
           placeholderTextColor="#64748b"
           autoCapitalize="none"
         />
@@ -270,8 +272,10 @@ export default function SettingsScreen() {
           例: {basePath}/{pathTemplate
             .replace(/\{plugin\}/g, "cmoa")
             .replace(/\{title\}/g, "タイトル名")
+            .replace(/\{volume:(\d+)\}/g, (_, d: string) => "1".padStart(Number(d), "0"))
+            .replace(/\{volume\}/g, "1")
+            .replace(/\{unit_ja\}/g, "巻")
             .replace(/\{unit\}/g, "vol")
-            .replace(/\{volume\}/g, "001")
             .replace(/\{author\}/g, "著者名")
             .replace(/\{tags\}/g, "タグ1 タグ2")
             .replace(/\{tags_comma\}/g, "タグ1,タグ2")}.zip

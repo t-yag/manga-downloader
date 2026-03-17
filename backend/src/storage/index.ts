@@ -7,7 +7,7 @@ import { logger } from "../logger.js";
 
 const log = logger.child({ module: "Storage" });
 
-const DEFAULT_PATH_TEMPLATE = "{title}/[{author}] {title}_{unit}{volume} - ({tags})";
+const DEFAULT_PATH_TEMPLATE = "{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})";
 
 interface PathTemplateVars {
   plugin: string;
@@ -41,18 +41,20 @@ export function resolveOutputPath(vars: PathTemplateVars): {
   const template =
     getSettingValue<string>("download.pathTemplate") ?? DEFAULT_PATH_TEMPLATE;
 
-  const volStr = String(vars.volume).padStart(3, "0");
-
   const sanitizedTags = (vars.tags ?? []).map(sanitize);
   const tagsStr = sanitizedTags.join(" ");
   const tagsCommaStr = sanitizedTags.join(",");
 
   const unitStr = vars.unit ?? "vol";
+  const unitJaMap: Record<string, string> = { vol: "巻", ep: "話" };
+  const unitJaStr = unitJaMap[unitStr] ?? unitStr;
 
   let resolved = template
     .replace(/\{plugin\}/g, sanitize(vars.plugin))
     .replace(/\{title\}/g, sanitize(vars.title))
-    .replace(/\{volume\}/g, volStr)
+    .replace(/\{volume:(\d+)\}/g, (_, d) => String(vars.volume).padStart(Number(d), "0"))
+    .replace(/\{volume\}/g, String(vars.volume))
+    .replace(/\{unit_ja\}/g, unitJaStr)
     .replace(/\{unit\}/g, unitStr)
     .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"))
     .replace(/\{tags\}/g, tagsStr)
