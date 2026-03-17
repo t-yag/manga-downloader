@@ -141,16 +141,8 @@ export async function* batchDownloadPages(
   for (let i = 0; i < imageUrls.length; i += concurrency) {
     const batch = imageUrls.slice(i, i + concurrency);
 
-    // Sequential within batch to honour requestInterval correctly
-    const results: number[] = [];
-    for (let idx = 0; idx < batch.length; idx++) {
-      const url = batch[idx];
+    const downloadOne = async (url: string, idx: number): Promise<number> => {
       const pageNum = i + idx + 1;
-
-      if (requestInterval > 0 && (i + idx) > 0) {
-        await sleep(requestInterval);
-      }
-
       try {
         const ext = path.extname(new URL(url).pathname) || defaultExt;
         const filename = `${filenamePrefix}${String(pageNum).padStart(3, "0")}${ext}`;
@@ -163,12 +155,25 @@ export async function* batchDownloadPages(
         });
 
         await fs.writeFile(filePath, buffer);
-        results.push(buffer.length);
+        return buffer.length;
       } catch (error) {
         log.error(`Failed to download page ${pageNum}: ${(error as Error).message}`);
         failedPages.push(pageNum);
-        results.push(0);
+        return 0;
       }
+    };
+
+    let results: number[];
+    if (requestInterval > 0) {
+      // Sequential within batch to honour requestInterval
+      results = [];
+      for (let idx = 0; idx < batch.length; idx++) {
+        if ((i + idx) > 0) await sleep(requestInterval);
+        results.push(await downloadOne(batch[idx], idx));
+      }
+    } else {
+      // True parallel within batch
+      results = await Promise.all(batch.map((url, idx) => downloadOne(url, idx)));
     }
 
     downloaded += batch.length;

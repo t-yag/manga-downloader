@@ -24,6 +24,7 @@ import {
   type Account,
   type PluginInfo,
 } from "../../src/api/client";
+import { SOURCE_COLORS, DEFAULT_SOURCE_COLOR } from "../../src/constants";
 
 export default function SettingsScreen() {
   const queryClient = useQueryClient();
@@ -212,7 +213,7 @@ export default function SettingsScreen() {
           <View style={styles.templateInfoBox}>
             <Text style={styles.templateInfoTitle}>テンプレート変数</Text>
             {[
-              ["{plugin}", "プラグインID（例: cmoa, piccoma）"],
+              ["{plugin}", "データソースID（例: cmoa, piccoma）"],
               ["{title}", "作品タイトル"],
               ["{unit}", "巻・話の種別（例: vol, ep）"],
               ["{volume}", "巻・話の番号（3桁ゼロ埋め、例: 001, 012）"],
@@ -260,13 +261,13 @@ export default function SettingsScreen() {
 
       {/* Plugins */}
       <View style={styles.sectionHeaderRow}>
-        <Ionicons name="extension-puzzle-outline" size={16} color="#94a3b8" />
-        <Text style={styles.sectionLabel}>プラグイン</Text>
+        <Ionicons name="layers-outline" size={16} color="#94a3b8" />
+        <Text style={styles.sectionLabel}>データソース</Text>
       </View>
       <View style={[styles.section, { paddingVertical: 6 }]}>
         {plugins.length === 0 ? (
           <View style={styles.emptyHint}>
-            <Text style={styles.hintText}>プラグインがありません</Text>
+            <Text style={styles.hintText}>データソースがありません</Text>
           </View>
         ) : (
           [...plugins].sort((a: PluginInfo, b: PluginInfo) => {
@@ -293,15 +294,11 @@ export default function SettingsScreen() {
               >
                 {/* Plugin header */}
                 <View style={styles.pluginHeader}>
-                  <Text style={styles.pluginName}>{p.name}</Text>
-                  <View
-                    style={[
-                      styles.contentTypeBadge,
-                      p.contentType === "series"
-                        ? styles.contentTypeSeries
-                        : styles.contentTypeStandalone,
-                    ]}
-                  >
+                  <View style={styles.pluginNameRow}>
+                    <View style={[styles.sourceColorDot, { backgroundColor: (SOURCE_COLORS[p.id] ?? DEFAULT_SOURCE_COLOR).text }]} />
+                    <Text style={styles.pluginName}>{p.name}</Text>
+                  </View>
+                  <View style={styles.contentTypeBadge}>
                     <Ionicons
                       name={
                         p.contentType === "series"
@@ -309,18 +306,9 @@ export default function SettingsScreen() {
                           : "document-outline"
                       }
                       size={11}
-                      color={
-                        p.contentType === "series" ? "#a78bfa" : "#fbbf24"
-                      }
+                      color="#64748b"
                     />
-                    <Text
-                      style={[
-                        styles.contentTypeBadgeText,
-                        p.contentType === "series"
-                          ? styles.contentTypeSeriesText
-                          : styles.contentTypeStandaloneText,
-                      ]}
-                    >
+                    <Text style={styles.contentTypeBadgeText}>
                       {p.contentType === "series" ? "シリーズ" : "単巻"}
                     </Text>
                   </View>
@@ -510,6 +498,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  pluginNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  sourceColorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   pluginName: { color: "#fff", fontSize: 14, fontWeight: "600" },
   contentTypeBadge: {
     flexDirection: "row",
@@ -519,11 +517,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  contentTypeSeries: { backgroundColor: "#2e1065" },
-  contentTypeStandalone: { backgroundColor: "#422006" },
-  contentTypeBadgeText: { fontSize: 11, fontWeight: "600" },
-  contentTypeSeriesText: { color: "#a78bfa" },
-  contentTypeStandaloneText: { color: "#fbbf24" },
+  contentTypeBadgeText: { fontSize: 11, fontWeight: "600", color: "#64748b" },
 
   // Plugin account
   pluginAccountRow: {

@@ -39,21 +39,51 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
+   * GET /api/library/tags
+   * List distinct display tags used across all library items.
+   */
+  app.get("/api/library/tags", async () => {
+    const rows = db
+      .select({ displayGenres: schema.library.displayGenres })
+      .from(schema.library)
+      .all();
+
+    const tagCount = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.displayGenres) continue;
+      const tags: string[] = JSON.parse(row.displayGenres);
+      for (const tag of tags) {
+        tagCount.set(tag, (tagCount.get(tag) ?? 0) + 1);
+      }
+    }
+
+    const tags = Array.from(tagCount.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { tags };
+  });
+
+  /**
    * GET /api/library
    * List titles in library with optional filtering, sorting, and pagination.
    *
    * Query params:
-   *   search    - partial match on title or author
-   *   pluginId  - filter by plugin
-   *   sort      - lastAccessedAt (default) | createdAt | title
-   *   order     - desc (default) | asc
-   *   limit     - page size (default 50)
-   *   offset    - pagination offset (default 0)
+   *   search      - partial match on title or author
+   *   pluginId    - filter by plugin (comma-separated for multiple)
+   *   contentType - filter by series|standalone (comma-separated for multiple)
+   *   tags        - filter by display tag (comma-separated, OR match)
+   *   sort        - lastAccessedAt (default) | createdAt | title | updatedAt
+   *   order       - desc (default) | asc
+   *   limit       - page size (default 50)
+   *   offset      - pagination offset (default 0)
    */
   app.get("/api/library", async (request) => {
     const query = request.query as {
       search?: string;
       pluginId?: string;
+      contentType?: string;
+      tags?: string;
       sort?: string;
       order?: string;
       limit?: string;
@@ -71,7 +101,36 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       );
     }
     if (query.pluginId) {
-      conditions.push(eq(schema.library.pluginId, query.pluginId));
+      const ids = query.pluginId.split(",").filter(Boolean);
+      if (ids.length === 1) {
+        conditions.push(eq(schema.library.pluginId, ids[0]));
+      } else if (ids.length > 1) {
+        conditions.push(inArray(schema.library.pluginId, ids));
+      }
+    }
+    if (query.contentType) {
+      const types = query.contentType.split(",").filter(Boolean);
+      // Resolve pluginIds matching any of the requested contentTypes
+      const matchingPluginIds = registry.getAll()
+        .filter((p) => types.includes(p.manifest.contentType))
+        .map((p) => p.manifest.id);
+      if (matchingPluginIds.length > 0) {
+        conditions.push(inArray(schema.library.pluginId, matchingPluginIds));
+      } else {
+        conditions.push(sql`0`);
+      }
+    }
+    if (query.tags) {
+      const tags = query.tags.split(",").filter(Boolean);
+      // OR: match any of the requested tags
+      const tagConditions = tags.map((tag) =>
+        like(schema.library.displayGenres, `%"${tag}"%`)
+      );
+      if (tagConditions.length === 1) {
+        conditions.push(tagConditions[0]);
+      } else if (tagConditions.length > 1) {
+        conditions.push(or(...tagConditions));
+      }
     }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -81,7 +140,9 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       ? schema.library.createdAt
       : query.sort === "title"
         ? schema.library.title
-        : schema.library.lastAccessedAt;
+        : query.sort === "updatedAt"
+          ? schema.library.updatedAt
+          : schema.library.lastAccessedAt;
     const orderFn = query.order === "asc" ? asc : desc;
     // For title sort, default to asc
     const orderDir = query.sort === "title" && !query.order ? asc : orderFn;

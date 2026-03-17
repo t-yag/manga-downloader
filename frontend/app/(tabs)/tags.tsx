@@ -28,7 +28,7 @@ import {
   type TagItemEntry,
 } from "../../src/api/client";
 import { useRouter } from "expo-router";
-import { PLUGIN_LABELS } from "../../src/constants";
+import { SOURCE_LABELS } from "../../src/constants";
 
 type Tab = "rules" | "unset";
 type Action = "show" | "map" | "hide";
@@ -702,7 +702,7 @@ function TagItemsList({
     <View style={{ marginBottom: 8 }}>
       <TouchableOpacity onPress={handleExpand} activeOpacity={0.6} style={st.tagItemsToggle}>
         <Text style={st.modalMeta}>
-          出典: {plugins.map((p) => PLUGIN_LABELS[p] ?? p).join(", ")} · {count}件
+          出典: {plugins.map((p) => SOURCE_LABELS[p] ?? p).join(", ")} · {count}件
         </Text>
         <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={12} color="#64748b" style={{ marginLeft: 4 }} />
       </TouchableOpacity>
@@ -723,7 +723,7 @@ function TagItemsList({
                   activeOpacity={0.6}
                 >
                   <Text style={st.tagItemTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={st.tagItemPlugin}>{PLUGIN_LABELS[item.pluginId] ?? item.pluginId}</Text>
+                  <Text style={st.tagItemPlugin}>{SOURCE_LABELS[item.pluginId] ?? item.pluginId}</Text>
                 </TouchableOpacity>
               ))}
               {items.length < total && (

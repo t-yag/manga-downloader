@@ -50,7 +50,7 @@ const STATUS_CONFIG: Record<
 
 type StatusFilter = "all" | "done" | "available" | "unavailable" | "other";
 
-import { PLUGIN_LABELS } from "../../src/constants";
+import { SOURCE_LABELS, SOURCE_COLORS, DEFAULT_SOURCE_COLOR } from "../../src/constants";
 
 const REASON_LABELS: Record<string, string> = {
   purchased: "購入済み",
@@ -188,7 +188,7 @@ export default function TitleDetailScreen() {
     mutationFn: (volumes: number[] | undefined) => syncTitle(Number(id), accountId, volumes),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["library", id] });
-      const source = PLUGIN_LABELS[title?.pluginId ?? ""] ?? title?.pluginId ?? "";
+      const source = SOURCE_LABELS[title?.pluginId ?? ""] ?? title?.pluginId ?? "";
       const parts: string[] = [];
       if (data.totalVolumes != null) {
         parts.push(`${source}からタイトル情報を更新`);
@@ -417,8 +417,8 @@ export default function TitleDetailScreen() {
                 {title.author ?? "著者不明"}
               </Text>
               <View style={styles.pluginRow}>
-                <View style={styles.pluginBadge}>
-                  <Text style={styles.pluginBadgeText}>{PLUGIN_LABELS[title.pluginId] ?? title.pluginId}</Text>
+                <View style={[styles.pluginBadge, { backgroundColor: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).bg }]}>
+                  <Text style={[styles.pluginBadgeText, { color: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).text }]}>{SOURCE_LABELS[title.pluginId] ?? title.pluginId}</Text>
                 </View>
                 <TouchableOpacity
                   onPress={() => {

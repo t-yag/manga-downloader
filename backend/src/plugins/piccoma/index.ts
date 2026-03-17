@@ -485,50 +485,61 @@ class PiccomaDownloader implements Downloader {
         message: `Downloading ${totalPages} pages...`,
       };
 
-      // Download and descramble images
+      // Download and descramble images (parallel batches)
       await fs.mkdir(job.outputDir, { recursive: true });
       let totalSize = 0;
+      let downloaded = 0;
+      const CONCURRENCY = 5;
 
-      for (let i = 0; i < totalPages; i++) {
-        const img = viewerData.images[i];
-        const pageNum = String(i + 1).padStart(4, "0");
-        const outPath = path.join(job.outputDir, `${pageNum}.jpg`);
+      for (let i = 0; i < totalPages; i += CONCURRENCY) {
+        const batch = viewerData.images.slice(i, i + CONCURRENCY);
 
-        if (!img.url) {
-          log.error({ pageIndex: i, imgData: img }, `Page ${i + 1}: image URL is empty`);
-          throw new Error(`Page ${i + 1}: image URL is empty. Check _pdata_.img structure.`);
-        }
+        const results = await Promise.all(
+          batch.map(async (img: any, idx: number) => {
+            const pageIndex = i + idx;
+            const pageNum = String(pageIndex + 1).padStart(4, "0");
+            const outPath = path.join(job.outputDir, `${pageNum}.jpg`);
 
-        log.debug(`Page ${i + 1}/${totalPages}: fetching...`);
-        const response = await fetch(img.url, {
-          headers: {
-            Referer: "https://piccoma.com/",
-            Origin: "https://piccoma.com",
-          },
-          signal: AbortSignal.timeout(30000),
-        });
+            if (!img.url) {
+              log.error({ pageIndex, imgData: img }, `Page ${pageIndex + 1}: image URL is empty`);
+              throw new Error(`Page ${pageIndex + 1}: image URL is empty. Check _pdata_.img structure.`);
+            }
 
-        if (!response.ok) {
-          throw new Error(`Failed to download page ${i + 1}: HTTP ${response.status}`);
-        }
+            log.debug(`Page ${pageIndex + 1}/${totalPages}: fetching...`);
+            const response = await fetch(img.url, {
+              headers: {
+                Referer: "https://piccoma.com/",
+                Origin: "https://piccoma.com",
+              },
+              signal: AbortSignal.timeout(30000),
+            });
 
-        const rawBuf = Buffer.from(new Uint8Array(await response.arrayBuffer()));
-        log.debug(`Page ${i + 1}/${totalPages}: ${rawBuf.length} bytes, descrambling...`);
+            if (!response.ok) {
+              throw new Error(`Failed to download page ${pageIndex + 1}: HTTP ${response.status}`);
+            }
 
-        const buffer = viewerData.isScrambled
-          ? await descrambleImage(rawBuf, img.seed)
-          : rawBuf;
+            const rawBuf = Buffer.from(new Uint8Array(await response.arrayBuffer()));
+            log.debug(`Page ${pageIndex + 1}/${totalPages}: ${rawBuf.length} bytes, descrambling...`);
 
-        await fs.writeFile(outPath, buffer);
-        totalSize += buffer.length;
+            const buffer = viewerData.isScrambled
+              ? await descrambleImage(rawBuf, img.seed)
+              : rawBuf;
 
-        const progress = 0.1 + (0.85 * (i + 1)) / totalPages;
+            await fs.writeFile(outPath, buffer);
+            return buffer.length;
+          }),
+        );
+
+        downloaded += batch.length;
+        totalSize += results.reduce((a, b) => a + b, 0);
+
+        const progress = 0.1 + (0.85 * downloaded) / totalPages;
         yield {
           phase: "downloading",
           progress,
-          currentPage: i + 1,
+          currentPage: downloaded,
           totalPages,
-          message: `Page ${i + 1}/${totalPages}`,
+          message: `Page ${downloaded}/${totalPages}`,
         };
       }
 

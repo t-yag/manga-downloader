@@ -100,8 +100,10 @@ export interface LibraryDetail extends Omit<LibraryTitle, "volumeSummary"> {
 
 export interface LibraryQuery {
   search?: string;
-  pluginId?: string;
-  sort?: "lastAccessedAt" | "createdAt" | "title";
+  pluginIds?: string[];
+  contentTypes?: ("series" | "standalone")[];
+  tags?: string[];
+  sort?: "lastAccessedAt" | "createdAt" | "title" | "updatedAt";
   order?: "asc" | "desc";
   limit?: number;
   offset?: number;
@@ -115,13 +117,24 @@ export interface LibraryResponse {
 export function getLibrary(params?: LibraryQuery) {
   const q = new URLSearchParams();
   if (params?.search) q.set("search", params.search);
-  if (params?.pluginId) q.set("pluginId", params.pluginId);
+  if (params?.pluginIds?.length) q.set("pluginId", params.pluginIds.join(","));
+  if (params?.contentTypes?.length) q.set("contentType", params.contentTypes.join(","));
+  if (params?.tags?.length) q.set("tags", params.tags.join(","));
   if (params?.sort) q.set("sort", params.sort);
   if (params?.order) q.set("order", params.order);
   if (params?.limit != null) q.set("limit", String(params.limit));
   if (params?.offset != null) q.set("offset", String(params.offset));
   const qs = q.toString();
   return request<LibraryResponse>(`/api/library${qs ? `?${qs}` : ""}`);
+}
+
+export interface TagInfo {
+  name: string;
+  count: number;
+}
+
+export function getLibraryTags() {
+  return request<{ tags: TagInfo[] }>("/api/library/tags");
 }
 
 export function getLibraryTitle(id: number) {
