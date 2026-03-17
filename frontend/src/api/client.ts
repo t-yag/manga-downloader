@@ -243,12 +243,19 @@ export function getPlugins() {
 
 // --- Accounts ---
 
+export interface AccountSession {
+  hasCookies: boolean;
+  cookieCount: number;
+  expiresAt: string | null;
+}
+
 export interface Account {
   id: number;
   pluginId: string;
   label: string | null;
   isActive: boolean;
   credentials: string;
+  session: AccountSession;
 }
 
 export function getAccounts() {
@@ -266,6 +273,18 @@ export function updateAccount(id: number, params: { label?: string; credentials?
   return request<{ message: string }>(`/api/accounts/${id}`, {
     method: "PUT",
     body: JSON.stringify(params),
+  });
+}
+
+export function loginAccount(id: number) {
+  return request<{ success: boolean; message: string }>(`/api/accounts/${id}/login`, {
+    method: "POST",
+  });
+}
+
+export function clearAccountSession(id: number) {
+  return request<{ message: string }>(`/api/accounts/${id}/clear-session`, {
+    method: "POST",
   });
 }
 

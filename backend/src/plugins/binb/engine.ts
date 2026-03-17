@@ -1,8 +1,9 @@
-import puppeteer, { Browser, Page } from 'puppeteer';
+import { Browser, Page } from 'puppeteer';
 import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
 import { logger } from '../../logger.js';
+import { launchBrowser } from '../browser.js';
 import type {
   DownloadJob,
   DownloadProgress,
@@ -17,14 +18,7 @@ export class BinbEngine {
   private page: Page | null = null;
   /** Map of blob URL → captured image buffer */
   private blobBuffers: Map<string, Buffer> = new Map();
-  private headless: boolean;
-  private executablePath?: string;
   private totalPages: number = 0;
-
-  constructor(headless: boolean, executablePath?: string) {
-    this.headless = headless;
-    this.executablePath = executablePath;
-  }
 
   async init(readerUrl: string, outputDir: string, cookies: CookieData[] | null) {
     log.info('Initializing...');
@@ -32,14 +26,9 @@ export class BinbEngine {
     await fs.mkdir(outputDir, { recursive: true });
 
     // Use portrait viewport to force single-page display mode
-    const launchOptions = {
-      headless: this.headless,
+    this.browser = await launchBrowser({
       defaultViewport: { width: 800, height: 1200 },
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      ...(this.executablePath ? { executablePath: this.executablePath } : {}),
-    };
-
-    this.browser = await puppeteer.launch(launchOptions);
+    });
     this.page = await this.browser.newPage();
 
     // Set authentication cookies

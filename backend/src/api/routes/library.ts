@@ -537,25 +537,28 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           }
         }
 
-        // Re-login if session is missing or invalid
-        if (!sessionValid && account.credentials) {
+        if (sessionValid) {
+          session = plugin.auth.getSession();
+        } else if (account.credentials) {
+          // Re-login if session is missing or invalid
           log.info(`Session invalid for account #${account.id}, re-logging in...`);
-          try {
-            const credentials = JSON.parse(account.credentials);
-            const success = await plugin.auth.login(credentials);
-            if (success && account.cookiePath) {
-              const fs = await import("fs/promises");
-              const path = await import("path");
-              await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
-              await plugin.auth.saveSession(account.cookiePath);
-              log.info(`Re-login successful for account #${account.id}`);
-            }
-          } catch (loginError) {
-            log.error(loginError, "Re-login failed");
+          const credentials = JSON.parse(account.credentials);
+          const success = await plugin.auth.login(credentials);
+          if (!success) {
+            return reply.status(401).send({ error: "ログインに失敗しました。認証情報を確認してください" });
           }
+          if (account.cookiePath) {
+            const fs = await import("fs/promises");
+            const path = await import("path");
+            await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
+            await plugin.auth.saveSession(account.cookiePath);
+            log.info(`Re-login successful for account #${account.id}`);
+          }
+          session = plugin.auth.getSession();
+        } else {
+          return reply.status(401).send({ error: "セッションが無効で、認証情報も未設定です" });
         }
 
-        session = plugin.auth.getSession();
         log.info(`Session: ${session ? `${session.cookies.length} cookies` : "null"}`);
       }
     } else {
@@ -585,7 +588,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         if (result.available) {
           newStatus = "available";
           reason = result.reason;
-        } else if (result.viewMode === 3 && vol.freeUntil) {
+        } else if (vol.freeUntil) {
           newStatus = "available";
           reason = "free";
         } else {
@@ -640,6 +643,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     const plugin = registry.get(title.pluginId);
 
     // Helper: resolve session for availability checking
+    // Returns session on success, null if no account/plugin, throws on auth failure.
     async function resolveSession() {
       if (!accountId || !plugin?.auth) return null;
       const account = db
@@ -654,20 +658,23 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         const loaded = await plugin.auth.loadSession(account.cookiePath);
         if (loaded) sessionValid = await plugin.auth.validateSession();
       }
-      if (!sessionValid && account.credentials) {
-        log.info(`Session invalid for account #${account.id}, re-logging in...`);
-        try {
-          const credentials = JSON.parse(account.credentials);
-          const success = await plugin.auth.login(credentials);
-          if (success && account.cookiePath) {
-            const fs = await import("fs/promises");
-            const path = await import("path");
-            await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
-            await plugin.auth.saveSession(account.cookiePath);
-          }
-        } catch (loginError) {
-          log.error(loginError, "Re-login failed");
-        }
+      if (sessionValid) return plugin.auth.getSession();
+
+      // Session invalid or missing — attempt re-login
+      if (!account.credentials) {
+        throw new Error("セッションが無効で、認証情報も未設定です");
+      }
+      log.info(`Session invalid for account #${account.id}, re-logging in...`);
+      const credentials = JSON.parse(account.credentials);
+      const success = await plugin.auth.login(credentials);
+      if (!success) {
+        throw new Error("ログインに失敗しました。認証情報を確認してください");
+      }
+      if (account.cookiePath) {
+        const fs = await import("fs/promises");
+        const path = await import("path");
+        await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
+        await plugin.auth.saveSession(account.cookiePath);
       }
       return plugin.auth.getSession();
     }
@@ -692,7 +699,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
         if (result.available) {
           newStatus = "available";
           newReason = result.reason;
-        } else if (result.viewMode === 3 && vol.freeUntil) {
+        } else if (vol.freeUntil) {
           newStatus = "available";
           newReason = "free";
         } else {
@@ -737,7 +744,9 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       try {
         availabilityResults = await checkAndUpdate(vols);
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
         log.error(error, "Targeted availability check failed");
+        return reply.status(401).send({ error: msg });
       }
 
       return {
@@ -923,7 +932,9 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     try {
       availabilityResults = await checkAndUpdate(checkTargetVols);
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       log.error(error, "Availability check failed during sync");
+      return reply.status(401).send({ error: msg });
     }
 
     const availableCount = availabilityResults.filter((r) => r.available).length + freePromoted;

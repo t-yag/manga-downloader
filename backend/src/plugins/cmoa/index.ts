@@ -142,19 +142,11 @@ class CmoaAvailabilityChecker implements AvailabilityChecker {
  * Cmoa downloader using shared BINB engine
  */
 class CmoaDownloader implements Downloader {
-  private headless: boolean;
-  private executablePath?: string;
-
-  constructor(headless = true, executablePath?: string) {
-    this.headless = headless;
-    this.executablePath = executablePath;
-  }
-
   async *download(
     job: DownloadJob,
     session: SessionData | null
   ): AsyncGenerator<DownloadProgress, DownloadResult> {
-    const engine = new BinbEngine(this.headless, this.executablePath);
+    const engine = new BinbEngine();
 
     try {
       await engine.init(job.readerUrl, job.outputDir, session?.cookies || null);
@@ -186,7 +178,7 @@ export function createCmoaPlugin(): Plugin {
     auth: new CmoaAuth(),
     metadata: new CmoaScraper(),
     availabilityChecker: new CmoaAvailabilityChecker(),
-    downloader: new CmoaDownloader(true, process.env.CHROME_EXECUTABLE_PATH),
+    downloader: new CmoaDownloader(),
     async dispose() {
       log.info("Plugin disposed");
     },

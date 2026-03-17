@@ -1,11 +1,11 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
 import { logger } from "../../logger.js";
+import { launchBrowser } from "../browser.js";
 import type {
   MetadataProvider,
   TitleInfo,
   VolumeInfo,
 } from "../base.js";
-import { launchOptions } from "./browser.js";
 
 const log = logger.child({ module: "PiccomaScraper" });
 
@@ -19,7 +19,7 @@ const PICCOMA_BASE = "https://piccoma.com/web";
  */
 export class PiccomaScraper implements MetadataProvider {
   private async createPage(): Promise<{ browser: Browser; page: Page }> {
-    const browser = await puppeteer.launch(launchOptions());
+    const browser = await launchBrowser();
     const page = await browser.newPage();
     return { browser, page };
   }

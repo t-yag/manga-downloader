@@ -230,19 +230,11 @@ class BookLiveAvailabilityChecker implements AvailabilityChecker {
 }
 
 class BookLiveDownloader implements Downloader {
-  private headless: boolean;
-  private executablePath?: string;
-
-  constructor(headless = true, executablePath?: string) {
-    this.headless = headless;
-    this.executablePath = executablePath;
-  }
-
   async *download(
     job: DownloadJob,
     session: SessionData | null
   ): AsyncGenerator<DownloadProgress, DownloadResult> {
-    const engine = new BinbEngine(this.headless, this.executablePath);
+    const engine = new BinbEngine();
 
     try {
       await engine.init(job.readerUrl, job.outputDir, session?.cookies || null);
@@ -253,13 +245,7 @@ class BookLiveDownloader implements Downloader {
   }
 }
 
-export function createBookLivePlugin(options?: {
-  headless?: boolean;
-  executablePath?: string;
-}): Plugin {
-  const headless = options?.headless ?? true;
-  const executablePath = options?.executablePath ?? process.env.CHROME_EXECUTABLE_PATH;
-
+export function createBookLivePlugin(): Plugin {
   return {
     manifest: {
       id: "booklive",
@@ -278,7 +264,7 @@ export function createBookLivePlugin(options?: {
     auth: new BookLiveAuth(),
     metadata: new BookLiveScraper(),
     availabilityChecker: new BookLiveAvailabilityChecker(),
-    downloader: new BookLiveDownloader(headless, executablePath),
+    downloader: new BookLiveDownloader(),
     async dispose() {
       log.info("Plugin disposed");
     },

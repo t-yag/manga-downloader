@@ -1,12 +1,12 @@
-import puppeteer, { Browser } from "puppeteer";
+import { Browser } from "puppeteer";
 import fs from "fs/promises";
 import { logger } from "../../logger.js";
+import { launchBrowser } from "../browser.js";
 import type {
   AuthProvider,
   CredentialField,
   SessionData,
 } from "../base.js";
-import { launchOptions } from "./browser.js";
 
 const log = logger.child({ module: "PiccomaAuth" });
 
@@ -28,7 +28,7 @@ export class PiccomaAuth implements AuthProvider {
 
     log.info("Logging in with browser...");
 
-    const browser: Browser = await puppeteer.launch(launchOptions());
+    const browser: Browser = await launchBrowser();
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
     page.setDefaultNavigationTimeout(30000);

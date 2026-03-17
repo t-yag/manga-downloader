@@ -148,25 +148,27 @@ export class Worker {
           }
         }
 
-        // Re-login if session is missing or invalid
-        if (!sessionValid && account.credentials) {
+        if (sessionValid) {
+          session = plugin.auth.getSession();
+        } else if (account.credentials) {
+          // Re-login if session is missing or invalid
           log.info(`Session invalid for account #${account.id}, re-logging in...`);
-          try {
-            const credentials = JSON.parse(account.credentials);
-            const success = await plugin.auth.login(credentials);
-            if (success && account.cookiePath) {
-              const fs = await import("fs/promises");
-              const path = await import("path");
-              await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
-              await plugin.auth.saveSession(account.cookiePath);
-              log.info(`Re-login successful for account #${account.id}`);
-            }
-          } catch (loginError) {
-            log.error(loginError, `Re-login failed for account #${account.id}`);
+          const credentials = JSON.parse(account.credentials);
+          const success = await plugin.auth.login(credentials);
+          if (!success) {
+            throw new Error("ログインに失敗しました。認証情報を確認してください");
           }
+          if (account.cookiePath) {
+            const fs = await import("fs/promises");
+            const path = await import("path");
+            await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
+            await plugin.auth.saveSession(account.cookiePath);
+            log.info(`Re-login successful for account #${account.id}`);
+          }
+          session = plugin.auth.getSession();
+        } else {
+          throw new Error("セッションが無効で、認証情報も未設定です");
         }
-
-        session = plugin.auth.getSession();
       }
     }
 

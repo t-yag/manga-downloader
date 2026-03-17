@@ -3,9 +3,10 @@
  * Uses Puppeteer-based login with visible browser (reCAPTCHA requires non-headless).
  */
 
-import puppeteer, { Browser } from "puppeteer";
+import { Browser } from "puppeteer";
 import fs from "fs/promises";
 import { logger } from "../../logger.js";
+import { launchBrowser } from "../browser.js";
 import type {
   AuthProvider,
   CredentialField,
@@ -45,17 +46,7 @@ export class BookLiveAuth implements AuthProvider {
 
     log.info("Logging in with browser...");
 
-    const launchOptions: any = {
-      headless: false, // reCAPTCHA requires visible browser
-      defaultViewport: { width: 1280, height: 800 },
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    };
-
-    if (process.env.CHROME_EXECUTABLE_PATH) {
-      launchOptions.executablePath = process.env.CHROME_EXECUTABLE_PATH;
-    }
-
-    this.browser = await puppeteer.launch(launchOptions);
+    this.browser = await launchBrowser();
     const page = await this.browser.newPage();
     page.setDefaultTimeout(60000);
     page.setDefaultNavigationTimeout(60000);

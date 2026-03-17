@@ -1,7 +1,8 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
 import axios from "axios";
 import fs from "fs/promises";
 import { logger } from "../../logger.js";
+import { launchBrowser } from "../browser.js";
 import type {
   AuthProvider,
   CredentialField,
@@ -45,17 +46,7 @@ export class CmoaAuth implements AuthProvider {
 
     log.info("Logging in with browser...");
 
-    const launchOptions: any = {
-      headless: false, // OpenID flow requires visible browser
-      defaultViewport: { width: 1280, height: 800 },
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    };
-
-    if (process.env.CHROME_EXECUTABLE_PATH) {
-      launchOptions.executablePath = process.env.CHROME_EXECUTABLE_PATH;
-    }
-
-    this.browser = await puppeteer.launch(launchOptions);
+    this.browser = await launchBrowser();
     const page = await this.browser.newPage();
     page.setDefaultTimeout(60000);
     page.setDefaultNavigationTimeout(60000);
@@ -74,45 +65,16 @@ export class CmoaAuth implements AuthProvider {
       await page.type('input[name="email"]', email, { delay: 100 });
       await page.type('input[name="password"]', password, { delay: 100 });
 
-      // Click login button
-      const submitButton = await page.$("#submitButton");
-      if (!submitButton) {
-        throw new Error("Login button not found");
-      }
-
-      await submitButton.click();
-
-      try {
-        await page.waitForNavigation({
-          waitUntil: "domcontentloaded",
-          timeout: 30000,
-        });
-      } catch (navError) {
-        // Navigation timeout can be ignored
-      }
-
-      // Wait for OpenID redirect (max 15 seconds)
-      const maxWaitTime = 15000;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < maxWaitTime) {
-        const currentUrl = page.url();
-
-        // Success: redirected to www.cmoa.jp
-        if (
-          currentUrl.includes("www.cmoa.jp") &&
-          !currentUrl.includes("/auth/login")
-        ) {
-          break;
-        }
-
-        // Failure: stuck on OpenID provider page
-        if (currentUrl.includes("member.cmoa.jp/openid/provider")) {
-          throw new Error("Login error: stuck on OpenID provider page");
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
+      // Submit form directly (the #submitButton triggers an async API call
+      // that doesn't navigate; form.submit() goes through the OpenID POST flow)
+      const [response] = await Promise.all([
+        page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+        page.evaluate(() => {
+          const form = document.querySelector("form") as HTMLFormElement;
+          if (!form) throw new Error("Login form not found");
+          form.submit();
+        }),
+      ]);
 
       // Get cookies
       const cookies = await page.cookies();

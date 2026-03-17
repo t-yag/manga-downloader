@@ -17,6 +17,8 @@ import {
   getAccounts,
   createAccount,
   updateAccount,
+  loginAccount,
+  clearAccountSession,
   getPlugins,
   healthCheck,
   getBaseUrl,
@@ -102,12 +104,18 @@ export default function SettingsScreen() {
         label: newAccEmail,
         credentials: { email: newAccEmail, password: newAccPassword },
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    onSuccess: async (account) => {
       setNewAccEmail("");
       setNewAccPassword("");
       setExpandedPluginId(null);
-      toast.success("アカウントを追加しました。");
+      toast.success("アカウントを追加しました。ログイン中...");
+      try {
+        await loginAccount(account.id);
+        toast.success("ログインしました。");
+      } catch (err: any) {
+        toast.error("ログイン失敗", { description: err.message });
+      }
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (err: Error) => {
       toast.error("エラー", { description: err.message });
@@ -126,6 +134,28 @@ export default function SettingsScreen() {
       setNewAccPassword("");
       setExpandedPluginId(null);
       toast.success("アカウント情報を更新しました。");
+    },
+    onError: (err: Error) => {
+      toast.error("エラー", { description: err.message });
+    },
+  });
+
+  const loginMutation = useMutation({
+    mutationFn: (accountId: number) => loginAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      toast.success("ログインしました。");
+    },
+    onError: (err: Error) => {
+      toast.error("ログイン失敗", { description: err.message });
+    },
+  });
+
+  const clearSessionMutation = useMutation({
+    mutationFn: (accountId: number) => clearAccountSession(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      toast.success("セッションを破棄しました。");
     },
     onError: (err: Error) => {
       toast.error("エラー", { description: err.message });
@@ -316,20 +346,81 @@ export default function SettingsScreen() {
 
                 {/* Account status for auth plugins */}
                 {needsAuth && pluginAccount && !isExpanded && (
-                  <TouchableOpacity
-                    style={styles.pluginAccountRow}
-                    onPress={() => {
-                      setExpandedPluginId(p.id);
-                      setNewAccEmail("");
-                      setNewAccPassword("");
-                    }}
-                  >
-                    <Ionicons name="person" size={13} color="#94a3b8" />
-                    <Text style={styles.pluginAccountEmail}>
-                      {pluginAccount.label ?? pluginAccount.pluginId}
-                    </Text>
-                    <Ionicons name="create-outline" size={14} color="#64748b" />
-                  </TouchableOpacity>
+                  <View>
+                    <TouchableOpacity
+                      style={styles.pluginAccountRow}
+                      onPress={() => {
+                        setExpandedPluginId(p.id);
+                        setNewAccEmail("");
+                        setNewAccPassword("");
+                      }}
+                    >
+                      <Ionicons name="person" size={13} color="#94a3b8" />
+                      <Text style={styles.pluginAccountEmail}>
+                        {pluginAccount.label ?? pluginAccount.pluginId}
+                      </Text>
+                      <Ionicons name="create-outline" size={14} color="#64748b" />
+                    </TouchableOpacity>
+
+                    {/* Session status & actions */}
+                    <View style={styles.sessionRow}>
+                      {(() => {
+                        const s = pluginAccount.session;
+                        const expired = s?.expiresAt && new Date(s.expiresAt) < new Date();
+                        const status = !s?.hasCookies ? "none" : expired ? "expired" : "active";
+                        return (
+                          <View style={[
+                            styles.sessionBadge,
+                            status === "active" ? styles.sessionActive
+                              : status === "expired" ? styles.sessionExpired
+                              : styles.sessionInactive,
+                          ]}>
+                            <View style={[styles.sessionDot, {
+                              backgroundColor: status === "active" ? "#4ade80"
+                                : status === "expired" ? "#fbbf24"
+                                : "#64748b",
+                            }]} />
+                            <Text style={
+                              status === "active" ? styles.sessionTextActive
+                                : status === "expired" ? styles.sessionTextExpired
+                                : styles.sessionTextInactive
+                            }>
+                              {status === "active"
+                                ? `ログイン済み (~${new Date(s!.expiresAt!).toLocaleDateString("ja-JP")})`
+                                : status === "expired"
+                                ? "期限切れ"
+                                : "未ログイン"}
+                            </Text>
+                          </View>
+                        );
+                      })()}
+
+                      <View style={styles.sessionActions}>
+                        <TouchableOpacity
+                          style={styles.sessionTextBtn}
+                          onPress={() => loginMutation.mutate(pluginAccount.id)}
+                          disabled={loginMutation.isPending}
+                        >
+                          {loginMutation.isPending && loginMutation.variables === pluginAccount.id ? (
+                            <ActivityIndicator color="#60a5fa" size="small" />
+                          ) : (
+                            <Text style={styles.sessionTextBtnLabel}>
+                              {pluginAccount.session?.hasCookies ? "再ログイン" : "ログイン"}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                        {pluginAccount.session?.hasCookies && (
+                          <TouchableOpacity
+                            style={styles.sessionTextBtn}
+                            onPress={() => clearSessionMutation.mutate(pluginAccount.id)}
+                            disabled={clearSessionMutation.isPending}
+                          >
+                            <Text style={styles.sessionTextBtnLabelDanger}>破棄</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  </View>
                 )}
 
                 {needsAuth && !pluginAccount && !isExpanded && (
@@ -558,6 +649,38 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cancelBtnText: { color: "#94a3b8", fontSize: 14, fontWeight: "600" },
+  sessionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  sessionBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  sessionActive: { backgroundColor: "#052e16" },
+  sessionExpired: { backgroundColor: "#422006" },
+  sessionInactive: { backgroundColor: "#1c1917" },
+  sessionDot: { width: 6, height: 6, borderRadius: 3 },
+  sessionTextActive: { color: "#4ade80", fontSize: 11, fontWeight: "600" },
+  sessionTextExpired: { color: "#fbbf24", fontSize: 11, fontWeight: "600" },
+  sessionTextInactive: { color: "#64748b", fontSize: 11, fontWeight: "600" },
+  sessionActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  sessionTextBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sessionTextBtnLabel: { color: "#60a5fa", fontSize: 12, fontWeight: "600" },
+  sessionTextBtnLabelDanger: { color: "#f87171", fontSize: 12, fontWeight: "600" },
   noAuthHint: { color: "#64748b", fontSize: 12, marginTop: 6 },
   fieldLabelRow: {
     flexDirection: "row",

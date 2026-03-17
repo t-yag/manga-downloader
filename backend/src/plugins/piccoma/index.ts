@@ -1,4 +1,4 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs/promises";
@@ -19,7 +19,7 @@ import type {
 } from "../base.js";
 import { PiccomaAuth } from "./auth.js";
 import { PiccomaScraper } from "./scraper.js";
-import { launchOptions } from "./browser.js";
+import { launchBrowser } from "../browser.js";
 import { logger } from "../../logger.js";
 
 const log = logger.child({ module: "Piccoma" });
@@ -223,7 +223,7 @@ class PiccomaAvailabilityChecker implements AvailabilityChecker {
     const volQueries = volumes.filter((v) => (v.unit ?? "vol") === "vol");
     log.info(`Checking availability: ${epQueries.length} ep(s), ${volQueries.length} vol(s), titleId=${titleId}`);
 
-    const browser = await puppeteer.launch(launchOptions());
+    const browser = await launchBrowser();
     const page = await browser.newPage();
 
     try {
@@ -364,7 +364,7 @@ class PiccomaDownloader implements Downloader {
 
     const startTime = Date.now();
 
-    const browser = await puppeteer.launch(launchOptions());
+    const browser = await launchBrowser();
     const page = await browser.newPage();
 
     try {
