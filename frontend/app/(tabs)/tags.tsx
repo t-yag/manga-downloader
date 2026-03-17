@@ -12,6 +12,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "../../src/toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -30,12 +31,13 @@ import {
   type TagItemEntry,
 } from "../../src/api/client";
 import { useRouter } from "expo-router";
-import { SOURCE_LABELS } from "../../src/constants";
+import { SOURCE_LABELS, TAB_CONTENT_PADDING } from "../../src/constants";
 
 type Tab = "rules" | "unset";
 type Action = "show" | "map" | "hide";
 
 export default function TagsScreen() {
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("rules");
   const [search, setSearch] = useState("");
@@ -126,7 +128,7 @@ export default function TagsScreen() {
   const isLoading = tab === "rules" ? rulesLoading : discoverLoading;
 
   return (
-    <View style={st.container}>
+    <View style={[st.container, Platform.OS === "ios" && { paddingTop: insets.top + TAB_CONTENT_PADDING }]}>
       {/* Tab bar */}
       <View style={st.tabBar}>
         <TouchableOpacity

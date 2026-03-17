@@ -34,7 +34,7 @@ import {
   type LibraryTitle,
   type LibraryQuery,
 } from "../../src/api/client";
-import { SOURCE_LABELS, SOURCE_COLORS, DEFAULT_SOURCE_COLOR } from "../../src/constants";
+import { SOURCE_LABELS, SOURCE_COLORS, DEFAULT_SOURCE_COLOR, TAB_CONTENT_PADDING } from "../../src/constants";
 
 const PAGE_SIZE = 50;
 
@@ -545,7 +545,7 @@ export default function LibraryScreen() {
   };
 
   return (
-    <View style={[styles.container, keyboardOffset > 0 && { paddingBottom: keyboardOffset }]}>
+    <View style={[styles.container, { paddingTop: insets.top + TAB_CONTENT_PADDING }, keyboardOffset > 0 && { paddingBottom: keyboardOffset }]}>
       <View style={{ flex: 1 }}>
         {/* Search + Sort bar */}
         <View style={styles.filterRow}>
@@ -787,7 +787,7 @@ export default function LibraryScreen() {
       </View>
 
       {/* Bottom: Add URL bar */}
-      <View style={styles.addRow}>
+      <View style={[styles.addRow, { paddingBottom: insets.bottom }]}>
         <TextInput
           style={styles.addInput}
           placeholder="URLを入力 (空なら📋から読み取り)"
@@ -823,7 +823,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     paddingTop: 10,
-    paddingBottom: 8,
     borderTopWidth: 1,
     borderTopColor: "#1e293b",
   },

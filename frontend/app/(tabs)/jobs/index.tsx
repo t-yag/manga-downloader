@@ -12,9 +12,11 @@ import {
 } from "react-native";
 import { toast } from "../../../src/toast";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, cancelJob, type Job } from "../../../src/api/client";
+import { TAB_CONTENT_PADDING } from "../../../src/constants";
 
 function confirmAction(title: string, message: string, onConfirm: () => void) {
   if (Platform.OS === "web") {
@@ -70,6 +72,7 @@ function formatDuration(start: string | null, end: string | null): string {
 }
 
 export default function JobsScreen() {
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -202,7 +205,7 @@ export default function JobsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === "ios" && { paddingTop: insets.top + TAB_CONTENT_PADDING }]}>
       {/* Filter tabs */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (

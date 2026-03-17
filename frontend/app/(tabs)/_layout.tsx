@@ -1,8 +1,45 @@
 import { Tabs } from "expo-router";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform } from "react-native";
 
-export default function TabsLayout() {
+const NATIVE_TAB_CONTENT_STYLE = { backgroundColor: "#0f172a" };
+
+function NativeTabsLayout() {
+  return (
+    <NativeTabs>
+      <NativeTabs.Trigger name="index" contentStyle={NATIVE_TAB_CONTENT_STYLE}>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "books.vertical", selected: "books.vertical.fill" }}
+        />
+        <NativeTabs.Trigger.Label>ライブラリ</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="tags" contentStyle={NATIVE_TAB_CONTENT_STYLE}>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "tag", selected: "tag.fill" }}
+        />
+        <NativeTabs.Trigger.Label>タグ管理</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="jobs/index" contentStyle={NATIVE_TAB_CONTENT_STYLE}>
+        <NativeTabs.Trigger.Icon
+          sf={{
+            default: "arrow.down.circle",
+            selected: "arrow.down.circle.fill",
+          }}
+        />
+        <NativeTabs.Trigger.Label>ジョブ</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings" contentStyle={NATIVE_TAB_CONTENT_STYLE}>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "gearshape", selected: "gearshape.fill" }}
+        />
+        <NativeTabs.Trigger.Label>設定</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  );
+}
+
+function DefaultTabsLayout() {
   return (
     <Tabs
       screenOptions={{
@@ -67,4 +104,11 @@ export default function TabsLayout() {
       />
     </Tabs>
   );
+}
+
+export default function TabsLayout() {
+  if (Platform.OS === "ios") {
+    return <NativeTabsLayout />;
+  }
+  return <DefaultTabsLayout />;
 }

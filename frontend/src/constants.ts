@@ -18,3 +18,6 @@ export const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 export const DEFAULT_SOURCE_COLOR = { bg: "#334155", text: "#94a3b8" };
+
+/** Native tab screens の内側余白 (SafeArea の外側) */
+export const TAB_CONTENT_PADDING = 16;
