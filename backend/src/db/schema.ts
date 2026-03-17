@@ -25,6 +25,8 @@ export const library = sqliteTable(
     coverUrl: text("cover_url"),
     metadata: text("metadata"), // JSON (plugin-specific)
     displayGenres: text("display_genres"), // JSON array (tag-rule-applied cache)
+    titleOverride: integer("title_override").default(0), // 1 = user edited, skip sync
+    authorOverride: integer("author_override").default(0),
     createdAt: text("created_at").default(sql`(datetime('now'))`),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
     lastAccessedAt: text("last_accessed_at").default(sql`(datetime('now'))`),
@@ -75,6 +77,7 @@ export const jobs = sqliteTable("jobs", {
   retryCount: integer("retry_count").default(0),
   message: text("message"),
   error: text("error"),
+  prevVolumeStatus: text("prev_volume_status"),
   startedAt: text("started_at"),
   finishedAt: text("finished_at"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),

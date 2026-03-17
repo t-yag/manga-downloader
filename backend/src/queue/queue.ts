@@ -1,5 +1,7 @@
 import { db, schema } from "../db/index.js";
-import { eq, and, asc, sql } from "drizzle-orm";
+import { eq, and, asc, sql, type InferSelectModel } from "drizzle-orm";
+
+type VolumeStatus = NonNullable<InferSelectModel<typeof schema.volumes>["status"]>;
 
 export interface QueuedJob {
   id: number;
@@ -28,6 +30,17 @@ export class JobQueue {
     volumeId?: number;
     priority?: number;
   }): Promise<number> {
+    // Capture the current volume status before changing it
+    let prevVolumeStatus: string | null = null;
+    if (params.volumeId) {
+      const vol = db
+        .select({ status: schema.volumes.status })
+        .from(schema.volumes)
+        .where(eq(schema.volumes.id, params.volumeId))
+        .get();
+      prevVolumeStatus = vol?.status ?? null;
+    }
+
     const result = db
       .insert(schema.jobs)
       .values({
@@ -37,6 +50,7 @@ export class JobQueue {
         priority: params.priority ?? 0,
         status: "pending",
         progress: 0,
+        prevVolumeStatus,
       })
       .returning({ id: schema.jobs.id })
       .get();
@@ -167,12 +181,44 @@ export class JobQueue {
 
     if (job.volumeId) {
       db.update(schema.volumes)
-        .set({ status: "cancelled" })
+        .set({ status: (job.prevVolumeStatus ?? "unknown") as VolumeStatus })
         .where(eq(schema.volumes.id, job.volumeId))
         .run();
     }
 
     return true;
+  }
+
+  /**
+   * Cancel all pending jobs. Returns the number of cancelled jobs.
+   */
+  async cancelAllPending(): Promise<number> {
+    const pendingJobs = db
+      .select()
+      .from(schema.jobs)
+      .where(eq(schema.jobs.status, "pending"))
+      .all();
+
+    db.transaction((tx) => {
+      for (const job of pendingJobs) {
+        tx.update(schema.jobs)
+          .set({
+            status: "cancelled",
+            finishedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.jobs.id, job.id))
+          .run();
+
+        if (job.volumeId) {
+          tx.update(schema.volumes)
+            .set({ status: (job.prevVolumeStatus ?? "unknown") as VolumeStatus })
+            .where(eq(schema.volumes.id, job.volumeId))
+            .run();
+        }
+      }
+    });
+
+    return pendingJobs.length;
   }
 
   /**

@@ -211,6 +211,7 @@ export interface Job {
   createdAt: string | null;
   titleName: string | null;
   volumeNum: number | null;
+  unit: string | null;
   libraryId: number | null;
 }
 
@@ -225,6 +226,13 @@ export function getJobs(params?: { status?: string; limit?: number; offset?: num
 
 export function cancelJob(id: number) {
   return request<{ message: string }>(`/api/jobs/${id}`, { method: "DELETE" });
+}
+
+export function cancelAllJobs() {
+  return request<{ message: string; pendingCancelled: number; runningCancelled: number }>(
+    "/api/jobs",
+    { method: "DELETE" },
+  );
 }
 
 // --- Plugins ---

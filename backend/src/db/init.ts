@@ -41,6 +41,8 @@ export function initDatabase(): void {
       cover_url TEXT,
       metadata TEXT,
       display_genres TEXT,
+      title_override INTEGER DEFAULT 0,
+      author_override INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       last_accessed_at TEXT DEFAULT (datetime('now'))
@@ -80,6 +82,7 @@ export function initDatabase(): void {
       retry_count INTEGER DEFAULT 0,
       message TEXT,
       error TEXT,
+      prev_volume_status TEXT,
       started_at TEXT,
       finished_at TEXT,
       created_at TEXT DEFAULT (datetime('now'))
@@ -102,6 +105,24 @@ export function initDatabase(): void {
     CREATE UNIQUE INDEX IF NOT EXISTS tag_rules_original_idx
       ON tag_rules(original);
   `);
+
+  // Migrations for existing databases
+  const hasColumn = sqlite
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('jobs') WHERE name = 'prev_volume_status'")
+    .get() as { cnt: number };
+  if (!hasColumn.cnt) {
+    sqlite.exec("ALTER TABLE jobs ADD COLUMN prev_volume_status TEXT");
+  }
+
+  // Add title_override / author_override columns
+  for (const col of ["title_override", "author_override"]) {
+    const has = sqlite
+      .prepare(`SELECT COUNT(*) as cnt FROM pragma_table_info('library') WHERE name = ?`)
+      .get(col) as { cnt: number };
+    if (!has.cnt) {
+      sqlite.exec(`ALTER TABLE library ADD COLUMN ${col} INTEGER DEFAULT 0`);
+    }
+  }
 
   // Seed default hide rules for common noise tags (idempotent via INSERT OR IGNORE)
   const defaultHideRules = ["SALE", "広告掲載中"];

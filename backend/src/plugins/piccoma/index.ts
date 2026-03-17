@@ -1,5 +1,6 @@
 import { Browser, Page } from "puppeteer";
 import sharp from "sharp";
+import * as cheerio from "cheerio";
 import path from "path";
 import fs from "fs/promises";
 import type {
@@ -20,6 +21,7 @@ import type {
 import { PiccomaAuth } from "./auth.js";
 import { PiccomaScraper } from "./scraper.js";
 import { launchBrowser } from "../browser.js";
+import { fetchWithRetry } from "../utils/http.js";
 import { logger } from "../../logger.js";
 
 const log = logger.child({ module: "Piccoma" });
@@ -204,16 +206,35 @@ async function descrambleImage(inputBuf: Buffer, seed: string): Promise<Buffer> 
 
 /**
  * Piccoma availability checker.
- * Loads the episode list page with session cookies and checks each episode's
- * status via CSS class on the DOM.
+ * Uses fetch + cheerio (no browser) to check episode/volume status via HTML.
  *
- * Status classes:
+ * Episode status classes:
  *   PCM-epList_status_free      → ¥0 (free)
  *   PCM-epList_status_waitfree  → 待てば¥0 (wait-for-free)
  *   PCM-epList_status_point     → has coin price (not purchased)
- *   (none of above + accessible) → purchased
+ *   PCM-epList_status_buy       → purchased
+ *
+ * Volume status: determined by li class names and button types.
  */
 class PiccomaAvailabilityChecker implements AvailabilityChecker {
+  private buildCookieString(session: SessionData | null): string {
+    return session?.cookies?.map((c) => `${c.name}=${c.value}`).join("; ") ?? "";
+  }
+
+  private async fetchHtml(url: string, cookieString: string): Promise<string> {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Cookie: cookieString,
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
+    }
+    return response.text();
+  }
+
   async checkAvailability(
     titleId: string,
     volumes: VolumeQuery[],
@@ -223,133 +244,104 @@ class PiccomaAvailabilityChecker implements AvailabilityChecker {
     const volQueries = volumes.filter((v) => (v.unit ?? "vol") === "vol");
     log.info(`Checking availability: ${epQueries.length} ep(s), ${volQueries.length} vol(s), titleId=${titleId}`);
 
-    const browser = await launchBrowser();
-    const page = await browser.newPage();
+    const cookieString = this.buildCookieString(session);
+    const results: VolumeAvailability[] = [];
 
-    try {
-      if (session?.cookies?.length) {
-        await page.setCookie(
-          ...session.cookies.map((c) => ({
-            name: c.name,
-            value: c.value,
-            domain: c.domain,
-            path: c.path || "/",
-            expires: c.expires,
-          })),
-        );
+    // Check episodes (話読み)
+    if (epQueries.length > 0) {
+      const url = `${PICCOMA_BASE}/product/${titleId}/episodes?etype=E`;
+      const html = await this.fetchHtml(url, cookieString);
+      const $ = cheerio.load(html);
+
+      // Verify login state
+      if (session?.cookies?.length && $(".PCM-headerMainLogin_loginButton").length > 0) {
+        throw new Error("セッションが無効です。再ログインしてください");
       }
 
-      const results: VolumeAvailability[] = [];
+      const statusMap = new Map<number, string>();
+      $("a[data-episode_id]").each((i, el) => {
+        const statusArea = $(el).find(".PCM-epList_status");
+        const statusHtml = statusArea.html() ?? "";
 
-      // Check episodes (話読み)
-      if (epQueries.length > 0) {
-        const url = `${PICCOMA_BASE}/product/${titleId}/episodes?etype=E`;
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await new Promise((r) => setTimeout(r, 3000));
-
-        const episodeStatuses = (await page.evaluate(`(function() {
-          var links = document.querySelectorAll("a[data-episode_id]");
-          var result = [];
-          for (var i = 0; i < links.length; i++) {
-            var a = links[i];
-            var statusArea = a.querySelector(".PCM-epList_status");
-            var statusHtml = statusArea ? statusArea.innerHTML : "";
-
-            var status = "unknown";
-            if (statusHtml.indexOf("epList_status_buy") !== -1) {
-              status = "purchased";
-            } else if (statusHtml.indexOf("epList_status_free") !== -1 && statusHtml.indexOf("waitfree") === -1) {
-              status = "free";
-            } else if (statusHtml.indexOf("waitfreeRead") !== -1) {
-              status = "waitfree_read";
-            } else if (statusHtml.indexOf("waitfree") !== -1) {
-              status = "wait_free";
-            } else if (statusHtml.indexOf("epList_status_point") !== -1) {
-              status = "priced";
-            }
-
-            result.push({ index: i + 1, status: status });
-          }
-          return result;
-        })()`)) as any[];
-
-        const statusMap = new Map<number, string>();
-        for (const ep of episodeStatuses) {
-          statusMap.set(ep.index, ep.status);
+        let status = "unknown";
+        if (statusHtml.includes("epList_status_buy")) {
+          status = "purchased";
+        } else if (statusHtml.includes("epList_status_free") && !statusHtml.includes("waitfree")) {
+          status = "free";
+        } else if (statusHtml.includes("waitfreeRead")) {
+          status = "waitfree_read";
+        } else if (statusHtml.includes("waitfree")) {
+          status = "wait_free";
+        } else if (statusHtml.includes("epList_status_point")) {
+          status = "priced";
         }
 
-        for (const vq of epQueries) {
-          const status = statusMap.get(vq.volume);
-          if (!status) {
-            results.push({ volume: vq.volume, unit: "ep", available: false, reason: "unknown" });
-          } else if (status === "purchased" || status === "free" || status === "waitfree_read") {
-            results.push({ volume: vq.volume, unit: "ep", available: true, reason: status });
-          } else if (status === "wait_free") {
-            results.push({ volume: vq.volume, unit: "ep", available: false, reason: "wait_free" });
-          } else if (status === "priced") {
-            results.push({ volume: vq.volume, unit: "ep", available: false, reason: "not_purchased" });
-          } else {
-            results.push({ volume: vq.volume, unit: "ep", available: false, reason: "unknown" });
-          }
+        statusMap.set(i + 1, status);
+      });
+
+      for (const vq of epQueries) {
+        const status = statusMap.get(vq.volume);
+        if (!status) {
+          results.push({ volume: vq.volume, unit: "ep", available: false, reason: "unknown" });
+        } else if (status === "purchased" || status === "free" || status === "waitfree_read") {
+          results.push({ volume: vq.volume, unit: "ep", available: true, reason: status });
+        } else if (status === "wait_free") {
+          results.push({ volume: vq.volume, unit: "ep", available: false, reason: "wait_free" });
+        } else if (status === "priced") {
+          results.push({ volume: vq.volume, unit: "ep", available: false, reason: "not_purchased" });
+        } else {
+          results.push({ volume: vq.volume, unit: "ep", available: false, reason: "unknown" });
         }
       }
-
-      // Check volumes (巻読み)
-      if (volQueries.length > 0) {
-        const volUrl = `${PICCOMA_BASE}/product/${titleId}/episodes?etype=V`;
-        await page.goto(volUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await new Promise((r) => setTimeout(r, 3000));
-
-        const volumeStatuses = (await page.evaluate(`(function() {
-          var items = document.querySelectorAll(".PCM-productSaleList_volume li");
-          var result = [];
-          var idx = 0;
-          for (var i = 0; i < items.length; i++) {
-            var li = items[i];
-            var titleEl = li.querySelector(".PCM-prdVol_title h2");
-            if (!titleEl) continue;
-            idx++;
-            var liClass = li.className || "";
-            var buyBtn = li.querySelector(".PCM-prdVol_buyBtn[data-episode_id]");
-
-            var status = "unknown";
-            if (liClass.indexOf("campaign_free") !== -1) {
-              status = "free";
-            } else if (liClass.indexOf("campaign_buy") !== -1 || liClass.indexOf("prdVol_buy") !== -1) {
-              status = "purchased";
-            } else if (buyBtn) {
-              status = "not_purchased";
-            }
-
-            result.push({ index: idx, status: status });
-          }
-          return result;
-        })()`)) as any[];
-
-        const volStatusMap = new Map<number, string>();
-        for (const vs of volumeStatuses) {
-          volStatusMap.set(vs.index, vs.status);
-        }
-
-        for (const vq of volQueries) {
-          const status = volStatusMap.get(vq.volume);
-          if (!status) {
-            results.push({ volume: vq.volume, unit: "vol", available: false, reason: "unknown" });
-          } else if (status === "free" || status === "purchased") {
-            results.push({ volume: vq.volume, unit: "vol", available: true, reason: status });
-          } else {
-            results.push({ volume: vq.volume, unit: "vol", available: false, reason: "not_purchased" });
-          }
-        }
-      }
-
-      const availableCount = results.filter((r) => r.available).length;
-      log.info(`Availability: ${availableCount}/${results.length} available`);
-
-      return results;
-    } finally {
-      await browser.close();
     }
+
+    // Check volumes (巻読み)
+    if (volQueries.length > 0) {
+      const volUrl = `${PICCOMA_BASE}/product/${titleId}/episodes?etype=V`;
+      const html = await this.fetchHtml(volUrl, cookieString);
+      const $ = cheerio.load(html);
+
+      // Verify login state (if episodes were skipped)
+      if (epQueries.length === 0 && session?.cookies?.length && $(".PCM-headerMainLogin_loginButton").length > 0) {
+        throw new Error("セッションが無効です。再ログインしてください");
+      }
+
+      const volStatusMap = new Map<number, string>();
+      let idx = 0;
+      $(".PCM-productSaleList_volume li").each((_, el) => {
+        const li = $(el);
+        if (!li.find(".PCM-prdVol_title h2").length) return;
+        idx++;
+        const liClass = li.attr("class") ?? "";
+
+        let status = "unknown";
+        if (liClass.includes("campaign_free")) {
+          status = "free";
+        } else if (liClass.includes("campaign_buy") || liClass.includes("prdVol_buy")) {
+          status = "purchased";
+        } else if (li.find(".PCM-prdVol_buyBtn[data-episode_id]").length) {
+          status = "not_purchased";
+        }
+
+        volStatusMap.set(idx, status);
+      });
+
+      for (const vq of volQueries) {
+        const status = volStatusMap.get(vq.volume);
+        if (!status) {
+          results.push({ volume: vq.volume, unit: "vol", available: false, reason: "unknown" });
+        } else if (status === "free" || status === "purchased") {
+          results.push({ volume: vq.volume, unit: "vol", available: true, reason: status });
+        } else {
+          results.push({ volume: vq.volume, unit: "vol", available: false, reason: "not_purchased" });
+        }
+      }
+    }
+
+    const availableCount = results.filter((r) => r.available).length;
+    log.info(`Availability: ${availableCount}/${results.length} available`);
+
+    return results;
   }
 }
 
@@ -506,19 +498,13 @@ class PiccomaDownloader implements Downloader {
             }
 
             log.debug(`Page ${pageIndex + 1}/${totalPages}: fetching...`);
-            const response = await fetch(img.url, {
+            const rawBuf = await fetchWithRetry({
+              url: img.url,
               headers: {
                 Referer: "https://piccoma.com/",
                 Origin: "https://piccoma.com",
               },
-              signal: AbortSignal.timeout(30000),
             });
-
-            if (!response.ok) {
-              throw new Error(`Failed to download page ${pageIndex + 1}: HTTP ${response.status}`);
-            }
-
-            const rawBuf = Buffer.from(new Uint8Array(await response.arrayBuffer()));
             log.debug(`Page ${pageIndex + 1}/${totalPages}: ${rawBuf.length} bytes, descrambling...`);
 
             const buffer = viewerData.isScrambled

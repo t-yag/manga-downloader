@@ -7,7 +7,7 @@ import { logger } from "../logger.js";
 
 const log = logger.child({ module: "Storage" });
 
-const DEFAULT_PATH_TEMPLATE = "{title}_{unit}_{volume}";
+const DEFAULT_PATH_TEMPLATE = "{title}/[{author}] {title}_{unit}{volume} - ({tags})";
 
 interface PathTemplateVars {
   plugin: string;
@@ -43,7 +43,9 @@ export function resolveOutputPath(vars: PathTemplateVars): {
 
   const volStr = String(vars.volume).padStart(3, "0");
 
-  const tagsStr = (vars.tags ?? []).join(" ");
+  const sanitizedTags = (vars.tags ?? []).map(sanitize);
+  const tagsStr = sanitizedTags.join(" ");
+  const tagsCommaStr = sanitizedTags.join(",");
 
   const unitStr = vars.unit ?? "vol";
 
@@ -53,8 +55,8 @@ export function resolveOutputPath(vars: PathTemplateVars): {
     .replace(/\{volume\}/g, volStr)
     .replace(/\{unit\}/g, unitStr)
     .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"))
-    .replace(/\{tags\}/g, tagsStr ? sanitize(tagsStr) : "")
-    .replace(/\{tags_comma\}/g, sanitize((vars.tags ?? []).join(",")));
+    .replace(/\{tags\}/g, tagsStr)
+    .replace(/\{tags_comma\}/g, tagsCommaStr);
 
   // Clean up trailing separators from empty variables
   resolved = resolved.replace(/[\s\-_]+$/g, "").replace(/\/[\s\-_]+\//g, "/");

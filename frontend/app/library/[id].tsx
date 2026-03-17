@@ -146,6 +146,7 @@ export default function TitleDetailScreen() {
   const [unitTab, setUnitTab] = useState<"ep" | "vol">("ep");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
+  const [editAuthor, setEditAuthor] = useState("");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useFocusEffect(
@@ -235,12 +236,12 @@ export default function TitleDetailScreen() {
   });
 
   const updateTitleMutation = useMutation({
-    mutationFn: (newTitle: string) => updateLibraryTitle(Number(id), { title: newTitle }),
+    mutationFn: (params: { title?: string; author?: string }) => updateLibraryTitle(Number(id), params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["library", id] });
       queryClient.invalidateQueries({ queryKey: ["library"] });
       setIsEditingTitle(false);
-      toast.success("タイトルを更新しました");
+      toast.success("更新しました");
     },
     onError: (err: Error) => toast.error("エラー", { description: err.message }),
   });
@@ -367,46 +368,57 @@ export default function TitleDetailScreen() {
             <View style={styles.titleInfo}>
               <View style={styles.titleTextRow}>
                 {isEditingTitle ? (
-                  <View style={styles.editTitleRow}>
-                    <TextInput
-                      style={styles.editTitleInput}
-                      value={editTitle}
-                      onChangeText={setEditTitle}
-                      autoFocus
-                      selectTextOnFocus
-                      onSubmitEditing={() => {
-                        const trimmed = editTitle.trim();
-                        if (trimmed && trimmed !== title.title) {
-                          updateTitleMutation.mutate(trimmed);
-                        } else {
-                          setIsEditingTitle(false);
-                        }
-                      }}
-                    />
-                    <TouchableOpacity
-                      onPress={() => {
-                        const trimmed = editTitle.trim();
-                        if (trimmed && trimmed !== title.title) {
-                          updateTitleMutation.mutate(trimmed);
-                        } else {
-                          setIsEditingTitle(false);
-                        }
-                      }}
-                      hitSlop={8}
-                      disabled={updateTitleMutation.isPending}
-                    >
-                      {updateTitleMutation.isPending ? (
-                        <ActivityIndicator color="#4ade80" size="small" />
-                      ) : (
-                        <Ionicons name="checkmark" size={18} color="#4ade80" />
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setIsEditingTitle(false)}
-                      hitSlop={8}
-                    >
-                      <Ionicons name="close" size={18} color="#64748b" />
-                    </TouchableOpacity>
+                  <View style={styles.editFieldsContainer}>
+                    <View style={styles.editTitleRow}>
+                      <TextInput
+                        style={[styles.editTitleInput, Platform.OS === "web" && { outlineStyle: "none" } as any]}
+                        value={editTitle}
+                        onChangeText={setEditTitle}
+                        autoFocus
+                        selectTextOnFocus
+                        placeholder="タイトル"
+                        placeholderTextColor="#475569"
+                      />
+                    </View>
+                    <View style={styles.editTitleRow}>
+                      <TextInput
+                        style={[styles.editAuthorInput, Platform.OS === "web" && { outlineStyle: "none" } as any]}
+                        value={editAuthor}
+                        onChangeText={setEditAuthor}
+                        placeholder="著者"
+                        placeholderTextColor="#475569"
+                      />
+                    </View>
+                    <View style={styles.editButtonRow}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const trimmedTitle = editTitle.trim();
+                          const trimmedAuthor = editAuthor.trim();
+                          const params: { title?: string; author?: string } = {};
+                          if (trimmedTitle && trimmedTitle !== title.title) params.title = trimmedTitle;
+                          if (trimmedAuthor !== (title.author ?? "")) params.author = trimmedAuthor;
+                          if (Object.keys(params).length > 0) {
+                            updateTitleMutation.mutate(params);
+                          } else {
+                            setIsEditingTitle(false);
+                          }
+                        }}
+                        hitSlop={8}
+                        disabled={updateTitleMutation.isPending}
+                      >
+                        {updateTitleMutation.isPending ? (
+                          <ActivityIndicator color="#4ade80" size="small" />
+                        ) : (
+                          <Ionicons name="checkmark" size={18} color="#4ade80" />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => setIsEditingTitle(false)}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="close" size={18} color="#64748b" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ) : (
                   <>
@@ -414,6 +426,7 @@ export default function TitleDetailScreen() {
                     <TouchableOpacity
                       onPress={() => {
                         setEditTitle(title.title);
+                        setEditAuthor(title.author ?? "");
                         setIsEditingTitle(true);
                       }}
                       hitSlop={8}
@@ -423,9 +436,11 @@ export default function TitleDetailScreen() {
                   </>
                 )}
               </View>
-              <Text style={styles.metaText}>
-                {title.author ?? "著者不明"}
-              </Text>
+              {!isEditingTitle && (
+                <Text style={styles.metaText}>
+                  {title.author ?? "著者不明"}
+                </Text>
+              )}
               <View style={styles.pluginRow}>
                 <View style={[styles.pluginBadge, { backgroundColor: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).bg }]}>
                   <Text style={[styles.pluginBadgeText, { color: (SOURCE_COLORS[title.pluginId] ?? DEFAULT_SOURCE_COLOR).text }]}>{SOURCE_LABELS[title.pluginId] ?? title.pluginId}</Text>
@@ -883,11 +898,20 @@ const styles = StyleSheet.create({
   },
   titleInfo: { flex: 1 },
   titleTextRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, flex: 1 },
+  editFieldsContainer: {
+    flex: 1,
+    gap: 6,
+  },
   editTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     flex: 1,
+  },
+  editButtonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   editTitleInput: {
     flex: 1,
@@ -900,6 +924,17 @@ const styles = StyleSheet.create({
     borderColor: "#334155",
     paddingHorizontal: 10,
     paddingVertical: 6,
+  },
+  editAuthorInput: {
+    flex: 1,
+    color: "#94a3b8",
+    fontSize: 13,
+    backgroundColor: "#1e293b",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#334155",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   sourceLinkBtn: { padding: 2 },
   titleText: { color: "#f1f5f9", fontSize: 20, fontWeight: "700" },

@@ -50,7 +50,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
-      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}_{unit}_{volume}");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/[{author}] {title}_{unit}{volume} - ({tags})");
     }
   }, [settings]);
 
@@ -248,7 +248,7 @@ export default function SettingsScreen() {
               ["{unit}", "巻・話の種別（例: vol, ep）"],
               ["{volume}", "巻・話の番号（3桁ゼロ埋め、例: 001, 012）"],
               ["{author}", "著者名"],
-              ["{tags}", "タグをアンダースコアで結合（例: タグ1_タグ2）"],
+              ["{tags}", "タグを半角スペースで結合（例: タグ1 タグ2）"],
               ["{tags_comma}", "タグをカンマ区切り（例: タグ1,タグ2）"],
             ].map(([variable, desc]) => (
               <View key={variable} style={styles.templateInfoRow}>
@@ -262,7 +262,7 @@ export default function SettingsScreen() {
           style={styles.input}
           value={pathTemplate}
           onChangeText={setPathTemplate}
-          placeholder="{plugin}/{title}/{unit}_{volume}"
+          placeholder="{title}/[{author}] {title}_{unit}{volume} - ({tags})"
           placeholderTextColor="#64748b"
           autoCapitalize="none"
         />
@@ -273,7 +273,7 @@ export default function SettingsScreen() {
             .replace(/\{unit\}/g, "vol")
             .replace(/\{volume\}/g, "001")
             .replace(/\{author\}/g, "著者名")
-            .replace(/\{tags\}/g, "タグ1_タグ2")
+            .replace(/\{tags\}/g, "タグ1 タグ2")
             .replace(/\{tags_comma\}/g, "タグ1,タグ2")}.zip
         </Text>
         <TouchableOpacity

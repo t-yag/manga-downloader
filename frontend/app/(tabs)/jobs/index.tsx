@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getJobs, cancelJob, type Job } from "../../../src/api/client";
+import { getJobs, cancelJob, cancelAllJobs, type Job } from "../../../src/api/client";
 import { TAB_CONTENT_PADDING } from "../../../src/constants";
 
 function confirmAction(title: string, message: string, onConfirm: () => void) {
@@ -126,6 +126,18 @@ export default function JobsScreen() {
     },
   });
 
+  const cancelAllMutation = useMutation({
+    mutationFn: cancelAllJobs,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      const total = data.pendingCancelled + data.runningCancelled;
+      toast.success(`${total}件のジョブをキャンセルしました`);
+    },
+    onError: (err: Error) => {
+      toast.error("エラー", { description: err.message });
+    },
+  });
+
   const filteredJobs = allJobs.filter((j) => {
     if (filter === "active") return j.status === "running" || j.status === "pending";
     if (filter === "done") return j.status === "done";
@@ -133,6 +145,7 @@ export default function JobsScreen() {
     return true;
   });
 
+  const pendingCount = allJobs.filter((j) => j.status === "pending").length;
   const activeCount = allJobs.filter(
     (j) => j.status === "running" || j.status === "pending"
   ).length;
@@ -144,7 +157,7 @@ export default function JobsScreen() {
     const isPending = item.status === "pending";
     const label = item.titleName
       ? item.volumeNum != null
-        ? `${item.titleName} ${item.volumeNum}巻`
+        ? `${item.titleName} ${item.volumeNum}${item.unit === "ep" ? "話" : "巻"}`
         : item.titleName
       : item.pluginId;
 
@@ -232,6 +245,21 @@ export default function JobsScreen() {
             )}
           </TouchableOpacity>
         ))}
+        {pendingCount > 0 && (
+          <TouchableOpacity
+            style={styles.cancelAllBtn}
+            onPress={() =>
+              confirmAction(
+                "全キャンセル",
+                `待機中${pendingCount}件を含む全ジョブをキャンセルしますか？`,
+                () => cancelAllMutation.mutate(),
+              )
+            }
+          >
+            <Ionicons name="stop-circle-outline" size={14} color="#fca5a5" />
+            <Text style={styles.cancelAllText}>全キャンセル</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Job list */}
@@ -319,6 +347,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   filterBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+
+  cancelAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#7f1d1d",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginLeft: "auto",
+  },
+  cancelAllText: {
+    color: "#fca5a5",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 
   // Row (compact)
   row: {

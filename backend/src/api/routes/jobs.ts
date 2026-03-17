@@ -29,6 +29,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return filtered.map((j) => {
       let titleName: string | null = null;
       let volumeNum: number | null = null;
+      let unit: string | null = null;
       let libraryId: number | null = null;
 
       if (j.volumeId) {
@@ -39,6 +40,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
           .get();
         if (vol) {
           volumeNum = vol.volumeNum;
+          unit = vol.unit ?? "vol";
           libraryId = vol.libraryId;
           if (vol.libraryId) {
             const lib = db
@@ -51,7 +53,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      return { ...j, titleName, volumeNum, libraryId };
+      return { ...j, titleName, volumeNum, unit, libraryId };
     });
   });
 
@@ -167,6 +169,31 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return { jobIds, message: `${jobIds.length} job(s) queued` };
+  });
+
+  // Cancel all pending & running jobs
+  app.delete("/api/jobs", async (request, reply) => {
+    // Abort all running jobs first
+    let runningCancelled = 0;
+    const runningJobs = db
+      .select()
+      .from(schema.jobs)
+      .where(eq(schema.jobs.status, "running"))
+      .all();
+
+    for (const job of runningJobs) {
+      const aborted = await worker.cancelRunningJob(job.id);
+      if (aborted) runningCancelled++;
+    }
+
+    // Cancel all pending jobs
+    const pendingCancelled = await jobQueue.cancelAllPending();
+
+    return {
+      message: `Cancelled ${pendingCancelled} pending and ${runningCancelled} running job(s)`,
+      pendingCancelled,
+      runningCancelled,
+    };
   });
 
   // Cancel job (pending or running)

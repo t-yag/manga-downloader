@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db, schema } from "../../db/index.js";
 import { eq, desc, asc, and, inArray, like, sql, or } from "drizzle-orm";
 import { registry } from "../../plugins/registry.js";
+import type { VolumeAvailability } from "../../plugins/base.js";
 import { jobQueue } from "../../queue/queue.js";
 import { logger } from "../../logger.js";
 import { getAllRules, updateDisplayGenres } from "../../tags/index.js";
@@ -402,16 +403,18 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     try {
       const titleInfo = await plugin.metadata.getTitleInfo(title.titleId);
 
-      // Update library entry
+      // Update library entry (respect user overrides)
+      const syncUpdates: Record<string, unknown> = {
+        genres: JSON.stringify(titleInfo.genres),
+        totalVolumes: titleInfo.totalVolumes,
+        coverUrl: titleInfo.coverUrl,
+        updatedAt: new Date().toISOString(),
+      };
+      if (!title.titleOverride) syncUpdates.title = titleInfo.seriesTitle;
+      if (!title.authorOverride) syncUpdates.author = titleInfo.author;
+
       db.update(schema.library)
-        .set({
-          title: titleInfo.seriesTitle,
-          author: titleInfo.author,
-          genres: JSON.stringify(titleInfo.genres),
-          totalVolumes: titleInfo.totalVolumes,
-          coverUrl: titleInfo.coverUrl,
-          updatedAt: new Date().toISOString(),
-        })
+        .set(syncUpdates)
         .where(eq(schema.library.id, title.id))
         .run();
 
@@ -679,15 +682,58 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       return plugin.auth.getSession();
     }
 
+    // Helper: force re-login (invalidate current session and login again)
+    async function forceRelogin() {
+      if (!accountId || !plugin?.auth) return null;
+      const account = db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, accountId))
+        .get();
+      if (!account?.credentials) {
+        throw new Error("セッションが無効で、認証情報も未設定です");
+      }
+      log.info(`Force re-login for account #${account.id}...`);
+      const credentials = JSON.parse(account.credentials);
+      const success = await plugin.auth.login(credentials);
+      if (!success) {
+        throw new Error("再ログインに失敗しました。認証情報を確認してください");
+      }
+      if (account.cookiePath) {
+        const fs = await import("fs/promises");
+        const path = await import("path");
+        await fs.mkdir(path.dirname(account.cookiePath), { recursive: true });
+        await plugin.auth.saveSession(account.cookiePath);
+      }
+      return plugin.auth.getSession();
+    }
+
     // Helper: check availability for given volumes and update DB
     async function checkAndUpdate(vols: { id: number; volumeNum: number; unit: string | null; status: string | null; freeUntil: string | null; metadata: string | null }[]) {
       if (vols.length === 0 || !plugin?.availabilityChecker) return [];
-      const session = await resolveSession();
-      const results = await plugin.availabilityChecker.checkAvailability(
-        title!.titleId,
-        vols.map((v) => ({ volume: v.volumeNum, unit: v.unit ?? "vol" })),
-        session
-      );
+      let session = await resolveSession();
+
+      let results: VolumeAvailability[];
+      try {
+        results = await plugin.availabilityChecker.checkAvailability(
+          title!.titleId,
+          vols.map((v) => ({ volume: v.volumeNum, unit: v.unit ?? "vol" })),
+          session
+        );
+      } catch (error: any) {
+        // Session was accepted by validateSession but rejected by the server — re-login and retry
+        if (error.message?.includes("セッションが無効")) {
+          log.warn("Session rejected by server, attempting re-login...");
+          session = await forceRelogin();
+          results = await plugin.availabilityChecker.checkAvailability(
+            title!.titleId,
+            vols.map((v) => ({ volume: v.volumeNum, unit: v.unit ?? "vol" })),
+            session
+          );
+        } else {
+          throw error;
+        }
+      }
       const now = new Date().toISOString();
       for (const result of results) {
         const vol = vols.find((v) => v.volumeNum === result.volume && (v.unit ?? "vol") === (result.unit ?? "vol"));
@@ -746,7 +792,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error(error, "Targeted availability check failed");
-        return reply.status(401).send({ error: msg });
+        const status = msg.includes("ログイン") || msg.includes("セッション") || msg.includes("認証") ? 401 : 500;
+        return reply.status(status).send({ error: msg });
       }
 
       return {
@@ -800,14 +847,17 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       throw error;
     }
 
+    const syncUpdates2: Record<string, unknown> = {
+      genres: JSON.stringify(titleInfo.genres),
+      totalVolumes: titleInfo.totalVolumes,
+      coverUrl: titleInfo.coverUrl,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!title.titleOverride) syncUpdates2.title = titleInfo.seriesTitle;
+    if (!title.authorOverride) syncUpdates2.author = titleInfo.author;
+
     db.update(schema.library)
-      .set({
-        author: titleInfo.author,
-        genres: JSON.stringify(titleInfo.genres),
-        totalVolumes: titleInfo.totalVolumes,
-        coverUrl: titleInfo.coverUrl,
-        updatedAt: new Date().toISOString(),
-      })
+      .set(syncUpdates2)
       .where(eq(schema.library.id, title.id))
       .run();
 
@@ -934,7 +984,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error(error, "Availability check failed during sync");
-      return reply.status(401).send({ error: msg });
+      const status = msg.includes("ログイン") || msg.includes("セッション") || msg.includes("認証") ? 401 : 500;
+      return reply.status(status).send({ error: msg });
     }
 
     const availableCount = availabilityResults.filter((r) => r.available).length + freePromoted;
@@ -1039,8 +1090,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     if (!existing) return reply.status(404).send({ error: "Title not found" });
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-    if (title !== undefined) updates.title = title;
-    if (author !== undefined) updates.author = author;
+    if (title !== undefined) {
+      updates.title = title;
+      updates.titleOverride = 1;
+    }
+    if (author !== undefined) {
+      updates.author = author;
+      updates.authorOverride = 1;
+    }
 
     db.update(schema.library)
       .set(updates)

@@ -110,7 +110,7 @@ export class PiccomaAuth implements AuthProvider {
       return false;
     }
 
-    log.info("Session valid");
+    log.info("Session valid (pksid present, not expired)");
     return true;
   }
 
