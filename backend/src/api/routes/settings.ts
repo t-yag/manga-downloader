@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   "download.imageFormat": "jpg",
   "browser.headless": true,
   "browser.executablePath": "",
+  "tags.unsetDefault": "hide",
 };
 
 /**

@@ -17,6 +17,7 @@ import {
 import { useRouter, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import {
   useQuery,
   useInfiniteQuery,
@@ -429,9 +430,18 @@ export default function LibraryScreen() {
       toast.error("URL解析に失敗しました", { description: err.message }),
   });
 
-  const handleAdd = () => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
+  const handleAdd = async () => {
+    let trimmed = url.trim();
+    if (!trimmed) {
+      try {
+        const clip = await Clipboard.getStringAsync();
+        trimmed = clip?.trim() ?? "";
+      } catch {
+        // clipboard access denied
+      }
+      if (!trimmed) return;
+      setUrl(trimmed);
+    }
     parseMutation.mutate(trimmed);
   };
 
@@ -780,7 +790,7 @@ export default function LibraryScreen() {
       <View style={styles.addRow}>
         <TextInput
           style={styles.addInput}
-          placeholder="URLを貼り付けて追加..."
+          placeholder="URLを入力 (空なら📋から読み取り)"
           placeholderTextColor="#64748b"
           value={url}
           onChangeText={setUrl}
@@ -790,9 +800,9 @@ export default function LibraryScreen() {
           editable={!isPending}
         />
         <TouchableOpacity
-          style={[styles.addBtn, !url.trim() && styles.addBtnDisabled]}
+          style={[styles.addBtn, isPending && styles.addBtnDisabled]}
           onPress={handleAdd}
-          disabled={isPending || !url.trim()}
+          disabled={isPending}
         >
           {isPending ? (
             <ActivityIndicator color="#fff" size="small" />

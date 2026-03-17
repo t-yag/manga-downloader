@@ -23,6 +23,8 @@ import {
   importTagRules,
   rebuildDisplayGenres,
   getTagItems,
+  getSettings,
+  updateSettings,
   type TagRule,
   type TagDiscoverItem,
   type TagItemEntry,
@@ -51,12 +53,27 @@ export default function TagsScreen() {
     queryKey: ["tags-discover"],
     queryFn: () => discoverTags(),
   });
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: getSettings,
+  });
+  const unsetDefault = (settings?.["tags.unsetDefault"] as "show" | "hide") ?? "hide";
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["tag-rules"] });
     queryClient.invalidateQueries({ queryKey: ["tags-discover"] });
     queryClient.invalidateQueries({ queryKey: ["library"] });
+    queryClient.invalidateQueries({ queryKey: ["libraryTags"] });
   };
+
+  const updateUnsetDefaultMut = useMutation({
+    mutationFn: (value: "show" | "hide") =>
+      updateSettings({ "tags.unsetDefault": value }).then(() => rebuildDisplayGenres()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      invalidateAll();
+    },
+  });
 
   const rebuildMut = useMutation({
     mutationFn: rebuildDisplayGenres,
@@ -197,6 +214,9 @@ export default function TagsScreen() {
           tags={unsetTags}
           onSelect={setEditingDiscover}
           search={search}
+          unsetDefault={unsetDefault}
+          onUnsetDefaultChange={(v) => updateUnsetDefaultMut.mutate(v)}
+          changePending={updateUnsetDefaultMut.isPending}
         />
       )}
 
@@ -341,13 +361,46 @@ function UnsetTab({
   tags,
   onSelect,
   search,
+  unsetDefault,
+  onUnsetDefaultChange,
+  changePending,
 }: {
   tags: TagDiscoverItem[];
   onSelect: (t: TagDiscoverItem) => void;
   search: string;
+  unsetDefault: "show" | "hide";
+  onUnsetDefaultChange: (v: "show" | "hide") => void;
+  changePending: boolean;
 }) {
   return (
     <ScrollView style={st.list}>
+      {/* Unset default toggle */}
+      <View style={st.unsetDefaultBar}>
+        <Text style={st.unsetDefaultLabel}>未設定タグの扱い</Text>
+        <View style={st.unsetDefaultToggle}>
+          {(["show", "hide"] as const).map((v) => {
+            const active = unsetDefault === v;
+            const color = v === "show" ? "#60a5fa" : "#f87171";
+            return (
+              <TouchableOpacity
+                key={v}
+                style={[st.unsetDefaultBtn, active && { borderColor: color, backgroundColor: `${color}15` }]}
+                onPress={() => !active && onUnsetDefaultChange(v)}
+                disabled={changePending}
+              >
+                {changePending && active ? (
+                  <ActivityIndicator size={12} color={color} />
+                ) : (
+                  <Text style={[st.unsetDefaultBtnText, active && { color, fontWeight: "700" }]}>
+                    {v === "show" ? "表示" : "非表示"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
       {tags.length === 0 ? (
         <View style={st.empty}>
           <Ionicons name="checkmark-circle-outline" size={40} color="#4ade80" />
@@ -894,6 +947,20 @@ const st = StyleSheet.create({
   sources: { color: "#475569", fontSize: 10, flexShrink: 1 },
   count: { color: "#475569", fontSize: 10, marginLeft: "auto" },
   quickBtn: { paddingHorizontal: 10, paddingVertical: 12 },
+
+  // Unset default toggle
+  unsetDefaultBar: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: "#1e293b", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+    marginBottom: 10,
+  },
+  unsetDefaultLabel: { color: "#94a3b8", fontSize: 12, fontWeight: "600" },
+  unsetDefaultToggle: { flexDirection: "row", gap: 6 },
+  unsetDefaultBtn: {
+    paddingHorizontal: 12, paddingVertical: 5, borderRadius: 6,
+    borderWidth: 1.5, borderColor: "#334155", minWidth: 52, alignItems: "center",
+  },
+  unsetDefaultBtnText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
 
   // Empty
   empty: { alignItems: "center", marginTop: 60, gap: 10 },

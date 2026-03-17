@@ -1,5 +1,6 @@
 import { db, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
+import { getSettingValue } from "../api/routes/settings.js";
 
 export interface TagRule {
   id: number;
@@ -18,8 +19,11 @@ export function getAllRules(): TagRule[] {
 /**
  * Apply tag rules to raw tags, producing display tags.
  * Simple dictionary lookup - no plugin scoping.
+ * When unsetDefault is "hide", tags without a rule are hidden (default).
+ * When unsetDefault is "show", tags without a rule are shown as-is.
  */
 export function applyTagRules(rawTags: string[], rules: TagRule[]): string[] {
+  const unsetDefault = getSettingValue<string>("tags.unsetDefault") ?? "hide";
   const ruleMap = new Map<string, TagRule>();
   for (const r of rules) {
     ruleMap.set(r.original.toLowerCase(), r);
@@ -28,7 +32,7 @@ export function applyTagRules(rawTags: string[], rules: TagRule[]): string[] {
   return rawTags
     .map((tag) => {
       const rule = ruleMap.get(tag.toLowerCase());
-      if (!rule) return tag;
+      if (!rule) return unsetDefault === "show" ? tag : null;
       if (rule.action === "hide") return null;
       if (rule.action === "show") return tag;
       return rule.mappedTo ?? tag;
