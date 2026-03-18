@@ -4,10 +4,12 @@ import archiver from "archiver";
 import { createWriteStream } from "fs";
 import { getSettingValue } from "../api/routes/settings.js";
 import { logger } from "../logger.js";
+import { renderTemplate, type TemplateVars } from "./template.js";
 
 const log = logger.child({ module: "Storage" });
 
-const DEFAULT_PATH_TEMPLATE = "{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})";
+const DEFAULT_PATH_TEMPLATE =
+  "{title}/\\[{author}\\] {title} 第{volume:2}{unit_ja}[ - ({tags})]";
 
 interface PathTemplateVars {
   plugin: string;
@@ -28,7 +30,15 @@ function sanitize(value: string): string {
 
 /**
  * Resolve the output path from a template string.
- * Variables: {plugin}, {title}, {volume}, {author}
+ *
+ * Template syntax:
+ *   {var}    — variable expansion
+ *   {var:N}  — zero-padded numeric variable
+ *   [ ... ]  — optional block (omitted if all variables inside are empty)
+ *   \\{ \\} \\[ \\] \\\\ — literal characters
+ *
+ * Available variables:
+ *   plugin, title, volume, unit, unit_ja, author, tags, tags_comma
  */
 export function resolveOutputPath(vars: PathTemplateVars): {
   outputDir: string;
@@ -49,22 +59,23 @@ export function resolveOutputPath(vars: PathTemplateVars): {
   const unitJaMap: Record<string, string> = { vol: "巻", ep: "話" };
   const unitJaStr = unitJaMap[unitStr] ?? unitStr;
 
-  let resolved = template
-    .replace(/\{plugin\}/g, sanitize(vars.plugin))
-    .replace(/\{title\}/g, sanitize(vars.title))
-    .replace(/\{volume:(\d+)\}/g, (_, d) => String(vars.volume).padStart(Number(d), "0"))
-    .replace(/\{volume\}/g, String(vars.volume))
-    .replace(/\{unit_ja\}/g, unitJaStr)
-    .replace(/\{unit\}/g, unitStr)
-    .replace(/\{author\}/g, sanitize(vars.author ?? "unknown"))
-    .replace(/\{tags\}/g, tagsStr)
-    .replace(/\{tags_comma\}/g, tagsCommaStr);
+  const templateVars: TemplateVars = {
+    plugin: sanitize(vars.plugin),
+    title: sanitize(vars.title),
+    volume: vars.volume,
+    unit: unitStr,
+    unit_ja: unitJaStr,
+    author: vars.author ? sanitize(vars.author) : undefined,
+    tags: tagsStr || undefined,
+    tags_comma: tagsCommaStr || undefined,
+  };
+
+  let resolved = renderTemplate(template, templateVars);
 
   // Clean up trailing separators from empty variables
   resolved = resolved.replace(/[\s\-_]+$/g, "").replace(/\/[\s\-_]+\//g, "/");
 
   const fullPath = path.resolve(basePath, resolved);
-  // The last segment becomes the zip filename
   const dirName = path.dirname(fullPath);
   const baseName = path.basename(fullPath);
 
