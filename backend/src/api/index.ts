@@ -39,5 +39,10 @@ export async function createApp() {
     timestamp: new Date().toISOString(),
   }));
 
+  // Capabilities (environment-dependent features)
+  app.get("/api/capabilities", async () => ({
+    enableBrowserLogin: process.env.ENABLE_BROWSER_LOGIN === "true",
+  }));
+
   return app;
 }

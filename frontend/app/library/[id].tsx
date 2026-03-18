@@ -103,6 +103,8 @@ function getExternalUrl(pluginId: string, titleId: string): string | null {
       return `https://nhentai.net/g/${titleId}/`;
     case "piccoma":
       return `https://piccoma.com/web/product/${titleId}`;
+    case "kindle":
+      return `https://www.amazon.co.jp/dp/${titleId}`;
     default:
       return null;
   }

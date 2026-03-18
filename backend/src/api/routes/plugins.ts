@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { registry } from "../../plugins/registry.js";
+import { resolvePluginSession } from "../../plugins/session.js";
 
 export async function pluginRoutes(app: FastifyInstance): Promise<void> {
   // List all plugins
@@ -30,7 +31,8 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const info = await plugin.metadata.getTitleInfo(titleId);
+      const session = await resolvePluginSession(id);
+      const info = await plugin.metadata.getTitleInfo(titleId, session);
       return info;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

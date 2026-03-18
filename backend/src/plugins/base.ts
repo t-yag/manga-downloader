@@ -5,12 +5,23 @@
 
 // --- Manifest ---
 
+/** Available login methods for auth plugins */
+export type LoginMethod = "credentials" | "browser" | "cookie_import";
+
 export interface PluginManifest {
   id: string;
   name: string;
   version: string;
   /** "series" = multi-volume title management, "standalone" = each item is independent */
   contentType: "series" | "standalone";
+  /** Login methods this plugin supports (empty or omitted = no auth) */
+  loginMethods?: LoginMethod[];
+  /** Cookie names that represent auth sessions (used for cookie_import UI and session status) */
+  authCookieNames?: string[];
+  /** URL the user should visit to obtain auth cookies (shown in cookie_import instructions) */
+  authUrl?: string;
+  /** Cookie domain override (default: derived from authUrl hostname) */
+  authDomain?: string;
   supportedFeatures: {
     search: boolean;
     metadata: boolean;
@@ -129,8 +140,8 @@ export interface VolumeInfo {
 }
 
 export interface MetadataProvider {
-  getTitleInfo(titleId: string): Promise<TitleInfo>;
-  getVolumeInfo(titleId: string, volume: number): Promise<VolumeInfo>;
+  getTitleInfo(titleId: string, session?: SessionData | null): Promise<TitleInfo>;
+  getVolumeInfo(titleId: string, volume: number, session?: SessionData | null): Promise<VolumeInfo>;
 }
 
 // --- Download ---

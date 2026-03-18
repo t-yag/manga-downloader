@@ -148,11 +148,16 @@ export class Worker {
           }
         }
 
+        const canAutoRelogin = plugin.manifest?.loginMethods?.includes("credentials") ?? false;
+
         if (sessionValid) {
           session = plugin.auth.getSession();
-        } else if (account.credentials) {
-          // Re-login if session is missing or invalid
+        } else if (canAutoRelogin) {
+          // Re-login only if plugin supports credentials-based login
           log.info(`Session invalid for account #${account.id}, re-logging in...`);
+          if (!account.credentials) {
+            throw new Error("認証情報が保存されていません。アカウント設定からログインしてください");
+          }
           const credentials = JSON.parse(account.credentials);
           const success = await plugin.auth.login(credentials);
           if (!success) {
@@ -167,7 +172,7 @@ export class Worker {
           }
           session = plugin.auth.getSession();
         } else {
-          throw new Error("セッションが無効で、認証情報も未設定です");
+          throw new Error("セッションが無効です。アカウント設定からログインしてください");
         }
       }
     }

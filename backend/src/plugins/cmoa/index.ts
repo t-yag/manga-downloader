@@ -163,6 +163,8 @@ export function createCmoaPlugin(): Plugin {
     name: "コミックシーモア",
     version: "1.0.0",
     contentType: "series",
+    loginMethods: ["credentials"],
+    authCookieNames: ["_ssid_", "_cmoa_login_session_token_", "prod_member_db_session"],
     supportedFeatures: {
       search: false,
       metadata: true,

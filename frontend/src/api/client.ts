@@ -237,12 +237,21 @@ export function cancelAllJobs() {
 
 // --- Plugins ---
 
+export type LoginMethod = "credentials" | "browser" | "cookie_import";
+
 export interface PluginInfo {
   id: string;
   name: string;
   version: string;
   contentType: "series" | "standalone";
+  loginMethods?: LoginMethod[];
+  authCookieNames?: string[];
+  authUrl?: string;
   supportedFeatures: Record<string, boolean>;
+}
+
+export interface Capabilities {
+  enableBrowserLogin: boolean;
 }
 
 export function getPlugins() {
@@ -270,7 +279,7 @@ export function getAccounts() {
   return request<Account[]>("/api/accounts");
 }
 
-export function createAccount(params: { pluginId: string; label?: string; credentials: Record<string, string> }) {
+export function createAccount(params: { pluginId: string; label?: string; credentials?: Record<string, string> }) {
   return request<Account>("/api/accounts", {
     method: "POST",
     body: JSON.stringify(params),
@@ -284,6 +293,10 @@ export function updateAccount(id: number, params: { label?: string; credentials?
   });
 }
 
+export function deleteAccount(id: number) {
+  return request<{ message: string }>(`/api/accounts/${id}`, { method: "DELETE" });
+}
+
 export function loginAccount(id: number) {
   return request<{ success: boolean; message: string }>(`/api/accounts/${id}/login`, {
     method: "POST",
@@ -294,6 +307,17 @@ export function clearAccountSession(id: number) {
   return request<{ message: string }>(`/api/accounts/${id}/clear-session`, {
     method: "POST",
   });
+}
+
+export function importCookies(id: number, cookies: Array<{ name: string; value: string; expires?: string }>) {
+  return request<{ success: boolean; valid: boolean; cookieCount: number; message: string }>(
+    `/api/accounts/${id}/import-cookies`,
+    { method: "POST", body: JSON.stringify({ cookies }) },
+  );
+}
+
+export function getCapabilities() {
+  return request<Capabilities>("/api/capabilities");
 }
 
 // --- Settings ---

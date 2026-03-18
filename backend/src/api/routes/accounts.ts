@@ -5,16 +5,6 @@ import { registry } from "../../plugins/registry.js";
 import fs from "fs/promises";
 import path from "path";
 
-/**
- * Cookie names that represent actual auth sessions per plugin.
- * We use these to determine session expiry instead of short-lived tracking cookies.
- */
-const AUTH_COOKIE_NAMES: Record<string, string[]> = {
-  cmoa: ["_ssid_", "_cmoa_login_session_token_", "prod_member_db_session"],
-  booklive: ["BL_MEM", "PHPSESSID"],
-  piccoma: ["pksid"],
-};
-
 /** Check if a cookie file exists and read basic session info */
 async function getSessionStatus(
   cookiePath: string | null,
@@ -34,7 +24,7 @@ async function getSessionStatus(
     }
 
     // Find the earliest expiry among auth-relevant cookies for this plugin
-    const authNames = AUTH_COOKIE_NAMES[pluginId] ?? [];
+    const authNames = registry.get(pluginId)?.manifest.authCookieNames ?? [];
     const authCookies = authNames.length > 0
       ? cookies.filter((c) => authNames.includes(c.name))
       : cookies;
@@ -69,10 +59,10 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
 
   // Create account
   app.post("/api/accounts", async (request, reply) => {
-    const { pluginId, label, credentials } = request.body as {
+    const { pluginId, label, credentials = {} } = request.body as {
       pluginId: string;
       label?: string;
-      credentials: Record<string, string>;
+      credentials?: Record<string, string>;
     };
 
     const plugin = registry.get(pluginId);
@@ -129,15 +119,30 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   // Delete account
   app.delete("/api/accounts/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const accountId = Number(id);
 
-    const result = db
-      .delete(schema.accounts)
-      .where(eq(schema.accounts.id, Number(id)))
+    const account = db
+      .select()
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, accountId))
+      .get();
+
+    if (!account) return reply.status(404).send({ error: "Account not found" });
+
+    // Clear FK references in jobs before deleting
+    db.update(schema.jobs)
+      .set({ accountId: null })
+      .where(eq(schema.jobs.accountId, accountId))
       .run();
 
-    if (result.changes === 0) {
-      return reply.status(404).send({ error: "Account not found" });
+    // Delete cookie file if it exists
+    if (account.cookiePath) {
+      await fs.unlink(account.cookiePath).catch(() => {});
     }
+
+    db.delete(schema.accounts)
+      .where(eq(schema.accounts.id, accountId))
+      .run();
 
     return { message: "Account deleted" };
   });
@@ -188,6 +193,90 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       return reply.status(500).send({ error: `Login failed: ${msg}` });
+    }
+  });
+
+  // Import cookies from structured auth cookie data
+  app.post("/api/accounts/:id/import-cookies", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { cookies: inputCookies } = request.body as {
+      cookies: Array<{ name: string; value: string; expires?: string }>;
+    };
+
+    if (!Array.isArray(inputCookies) || inputCookies.length === 0) {
+      return reply.status(400).send({ error: "cookies array is required" });
+    }
+
+    const account = db
+      .select()
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, Number(id)))
+      .get();
+
+    if (!account) return reply.status(404).send({ error: "Account not found" });
+
+    if (!account.cookiePath) {
+      return reply.status(500).send({ error: "Account has no cookie path configured" });
+    }
+
+    const plugin = registry.get(account.pluginId);
+    if (!plugin?.auth) {
+      return reply.status(400).send({ error: "Plugin does not support auth" });
+    }
+
+    try {
+      // Infer cookie domain from manifest (authDomain override, or derived from authUrl)
+      const domain = plugin.manifest.authDomain
+        ?? (plugin.manifest.authUrl ? "." + new URL(plugin.manifest.authUrl).hostname.replace(/^www\./, "") : "");
+
+      const cookies = inputCookies
+        .filter((c) => c.name && c.value)
+        .map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain,
+          path: "/",
+          expires: c.expires ? Math.floor(new Date(c.expires).getTime() / 1000) : -1,
+        }));
+
+      if (cookies.length === 0) {
+        return reply.status(400).send({ error: "No valid cookies provided" });
+      }
+
+      // Save cookie file
+      const cookieDir = path.dirname(account.cookiePath);
+      await fs.mkdir(cookieDir, { recursive: true });
+      await fs.writeFile(
+        account.cookiePath,
+        JSON.stringify(cookies, null, 2),
+        "utf-8",
+      );
+
+      // Validate the imported session
+      await plugin.auth.loadSession(account.cookiePath);
+      const valid = await plugin.auth.validateSession();
+
+      if (!valid) {
+        // Remove invalid cookie file so the account doesn't appear as "logged in"
+        await fs.unlink(account.cookiePath).catch(() => {});
+      }
+
+      db.update(schema.accounts)
+        .set({ updatedAt: new Date().toISOString() })
+        .where(eq(schema.accounts.id, Number(id)))
+        .run();
+
+      return {
+        success: true,
+        valid,
+        cookieCount: cookies.length,
+        message: valid
+          ? `${cookies.length}個のCookieをインポートしました（セッション有効）`
+          : `Cookieが無効です。正しい値か確認してください`,
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return reply.status(500).send({ error: `Cookie import failed: ${msg}` });
     }
   });
 

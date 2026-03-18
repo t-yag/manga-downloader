@@ -613,6 +613,8 @@ export function createPiccomaPlugin(): Plugin {
     name: "ピッコマ",
     version: "1.0.0",
     contentType: "series",
+    loginMethods: ["credentials"],
+    authCookieNames: ["pksid"],
     supportedFeatures: {
       search: false,
       metadata: true,

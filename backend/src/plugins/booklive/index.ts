@@ -252,6 +252,8 @@ export function createBookLivePlugin(): Plugin {
       name: "BookLive",
       version: "1.0.0",
       contentType: "series",
+      loginMethods: ["credentials"],
+      authCookieNames: ["BL_MEM", "PHPSESSID"],
       supportedFeatures: {
         search: false,
         metadata: true,

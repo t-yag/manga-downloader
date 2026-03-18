@@ -7,6 +7,9 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Linking,
+  Modal,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "../../src/toast";
@@ -18,16 +21,56 @@ import {
   createAccount,
   updateAccount,
   loginAccount,
+  deleteAccount,
   clearAccountSession,
+  importCookies,
   getPlugins,
+  getCapabilities,
   healthCheck,
   getBaseUrl,
   setBaseUrl,
   type Account,
   type PluginInfo,
+  type LoginMethod,
 } from "../../src/api/client";
 import { SOURCE_COLORS, DEFAULT_SOURCE_COLOR } from "../../src/constants";
 import { colors, radius } from "../../src/theme";
+
+const LOGIN_METHOD_INFO: Record<LoginMethod, {
+  icon: string;
+  label: string;
+  short: string;
+  how: string;
+  onExpiry: string;
+  auto: boolean;
+}> = {
+  credentials: {
+    icon: "mail-outline",
+    label: "メール/パスワード",
+    short: "メール/PW",
+    how: "認証情報をサーバーに保存し、Puppeteerで自動ログイン",
+    onExpiry: "サーバーが自動で再ログイン（手動操作不要）",
+    auto: true,
+  },
+  browser: {
+    icon: "globe-outline",
+    label: "ブラウザログイン",
+    short: "ブラウザ",
+    how: "サーバー側でPuppeteerブラウザが起動、手動でログイン操作（コンテナ・スマホ環境では利用不可）",
+    onExpiry: "再度ブラウザログインが必要",
+    auto: false,
+  },
+  cookie_import: {
+    icon: "clipboard-outline",
+    label: "Cookieインポート",
+    short: "Cookie",
+    how: "ブラウザのDevToolsからCookie値をコピー&ペースト",
+    onExpiry: "再度Cookieのインポートが必要",
+    auto: false,
+  },
+};
+
+const ALL_LOGIN_METHODS = Object.keys(LOGIN_METHOD_INFO) as LoginMethod[];
 
 export default function SettingsScreen() {
   const queryClient = useQueryClient();
@@ -36,8 +79,13 @@ export default function SettingsScreen() {
   const [testing, setTesting] = useState(false);
 
   const [expandedPluginId, setExpandedPluginId] = useState<string | null>(null);
+  const [loginMethodTab, setLoginMethodTab] = useState<LoginMethod>("credentials");
   const [newAccEmail, setNewAccEmail] = useState("");
   const [newAccPassword, setNewAccPassword] = useState("");
+  const [cookieValues, setCookieValues] = useState<Record<string, string>>({});
+  const [cookieExpires, setCookieExpires] = useState<Record<string, string>>({});
+  const [showAuthInfo, setShowAuthInfo] = useState(false);
+  const [editingCredentials, setEditingCredentials] = useState(false);
 
   const [basePath, setBasePath] = useState("");
   const [pathTemplate, setPathTemplate] = useState("");
@@ -63,6 +111,11 @@ export default function SettingsScreen() {
   const { data: plugins = [] } = useQuery({
     queryKey: ["plugins"],
     queryFn: getPlugins,
+  });
+
+  const { data: capabilities } = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: getCapabilities,
   });
 
   const testConnection = async () => {
@@ -99,22 +152,65 @@ export default function SettingsScreen() {
   });
 
   const addAccountMutation = useMutation({
-    mutationFn: (pluginId: string) =>
-      createAccount({
-        pluginId,
-        label: newAccEmail,
-        credentials: { email: newAccEmail, password: newAccPassword },
-      }),
-    onSuccess: async (account) => {
-      setNewAccEmail("");
-      setNewAccPassword("");
-      setExpandedPluginId(null);
-      toast.success("アカウントを追加しました。ログイン中...");
-      try {
-        await loginAccount(account.id);
-        toast.success("ログインしました。");
-      } catch (err: any) {
-        toast.error("ログイン失敗", { description: err.message });
+    mutationFn: ({ pluginId, method }: { pluginId: string; method: LoginMethod }) => {
+      if (method === "credentials") {
+        return createAccount({
+          pluginId,
+          label: newAccEmail,
+          credentials: { email: newAccEmail, password: newAccPassword },
+        });
+      }
+      // browser or cookie_import: create account without credentials
+      return createAccount({ pluginId, label: pluginId });
+    },
+    onSuccess: async (account, { method }) => {
+      if (method === "credentials") {
+        setNewAccEmail("");
+        setNewAccPassword("");
+        setExpandedPluginId(null);
+        toast.success("アカウントを追加しました。ログイン中...");
+        try {
+          await loginAccount(account.id);
+          toast.success("ログインしました。");
+        } catch (err: any) {
+          toast.error("ログイン失敗", { description: err.message });
+        }
+      } else if (method === "browser") {
+        toast.success("アカウントを追加しました。ブラウザでログインしてください...");
+        try {
+          await loginAccount(account.id);
+          toast.success("ログインしました。");
+          setExpandedPluginId(null);
+        } catch (err: any) {
+          toast.error("ログイン失敗", { description: err.message });
+        }
+      } else if (method === "cookie_import") {
+        const hasCookieData = Object.values(cookieValues).some((v) => v.trim());
+        if (hasCookieData) {
+          // Auto-import the cookies that were already filled in
+          try {
+            const cookieArray = Object.entries(cookieValues)
+              .filter(([, v]) => v.trim())
+              .map(([name, value]) => ({
+                name,
+                value: value.trim(),
+                expires: cookieExpires[name]?.trim() || undefined,
+              }));
+            const result = await importCookies(account.id, cookieArray);
+            if (result.valid) {
+              setCookieValues({});
+              setCookieExpires({});
+              setExpandedPluginId(null);
+              toast.success(result.message);
+            } else {
+              toast.error("Cookie インポート", { description: result.message });
+            }
+          } catch (err: any) {
+            toast.error("Cookie インポート失敗", { description: err.message });
+          }
+        } else {
+          toast.success("アカウントを追加しました。Cookieをインポートしてください。");
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
@@ -131,13 +227,51 @@ export default function SettingsScreen() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      setNewAccEmail("");
       setNewAccPassword("");
-      setExpandedPluginId(null);
-      toast.success("アカウント情報を更新しました。");
+      setEditingCredentials(false);
+      toast.success("認証情報を更新しました。再ログインしてください。");
     },
     onError: (err: Error) => {
       toast.error("エラー", { description: err.message });
+    },
+  });
+
+  const importCookiesMutation = useMutation({
+    mutationFn: (accountId: number) => {
+      const cookieArray = Object.entries(cookieValues)
+        .filter(([, v]) => v.trim())
+        .map(([name, value]) => ({
+          name,
+          value: value.trim(),
+          expires: cookieExpires[name]?.trim() || undefined,
+        }));
+      return importCookies(accountId, cookieArray);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      if (result.valid) {
+        setCookieValues({});
+        setCookieExpires({});
+        setExpandedPluginId(null);
+        toast.success(result.message);
+      } else {
+        toast.error("Cookie インポート", { description: result.message });
+      }
+    },
+    onError: (err: Error) => {
+      toast.error("Cookie インポート失敗", { description: err.message });
+    },
+  });
+
+  const deleteAccountMutation = useMutation({
+    mutationFn: (accountId: number) => deleteAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      setExpandedPluginId(null);
+      toast.success("アカウントを削除しました。");
+    },
+    onError: (err: Error) => {
+      toast.error("削除失敗", { description: err.message });
     },
   });
 
@@ -298,6 +432,17 @@ export default function SettingsScreen() {
       <View style={styles.sectionHeaderRow}>
         <Ionicons name="layers-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.sectionLabel}>データソース</Text>
+        <TouchableOpacity
+          onPress={() => setShowAuthInfo(true)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ marginLeft: 2 }}
+        >
+          <Ionicons
+            name="help-circle-outline"
+            size={15}
+            color={colors.textMuted}
+          />
+        </TouchableOpacity>
       </View>
       <View style={[styles.section, { paddingVertical: 6 }]}>
         {plugins.length === 0 ? (
@@ -318,6 +463,12 @@ export default function SettingsScreen() {
             );
             const needsAuth = p.supportedFeatures.auth;
             const isExpanded = expandedPluginId === p.id;
+
+            // Available login methods for this plugin, filtered by environment
+            const allMethods = p.loginMethods ?? [];
+            const availableMethods = allMethods.filter(
+              (m) => m !== "browser" || (capabilities?.enableBrowserLogin === true && Platform.OS === "web")
+            );
 
             return (
               <View
@@ -349,151 +500,345 @@ export default function SettingsScreen() {
                   </View>
                 </View>
 
-                {/* Account status for auth plugins */}
-                {needsAuth && pluginAccount && !isExpanded && (
-                  <View>
-                    <TouchableOpacity
-                      style={styles.pluginAccountRow}
-                      onPress={() => {
-                        setExpandedPluginId(p.id);
-                        setNewAccEmail("");
-                        setNewAccPassword("");
-                      }}
-                    >
-                      <Ionicons name="person" size={13} color={colors.textSecondary} />
-                      <Text style={styles.pluginAccountEmail}>
-                        {pluginAccount.label ?? pluginAccount.pluginId}
-                      </Text>
-                      <Ionicons name="create-outline" size={14} color={colors.textMuted} />
-                    </TouchableOpacity>
+                {/* Auth section */}
+                {needsAuth && (() => {
+                  const s = pluginAccount?.session;
+                  const hasCookies = !!s?.hasCookies;
+                  const expired = s?.expiresAt && new Date(s.expiresAt) < new Date();
+                  const cookieStatus: "active" | "expired" | "none" =
+                    !hasCookies ? "none" : expired ? "expired" : "active";
+                  const allMethods = ALL_LOGIN_METHODS;
 
-                    {/* Session status & actions */}
-                    <View style={styles.sessionRow}>
-                      {(() => {
-                        const s = pluginAccount.session;
-                        const expired = s?.expiresAt && new Date(s.expiresAt) < new Date();
-                        const status = !s?.hasCookies ? "none" : expired ? "expired" : "active";
-                        return (
-                          <View style={[
-                            styles.sessionBadge,
-                            status === "active" ? styles.sessionActive
-                              : status === "expired" ? styles.sessionExpired
-                              : styles.sessionInactive,
-                          ]}>
-                            <View style={[styles.sessionDot, {
-                              backgroundColor: status === "active" ? colors.success
-                                : status === "expired" ? colors.warning
-                                : colors.textMuted,
-                            }]} />
-                            <Text style={
-                              status === "active" ? styles.sessionTextActive
-                                : status === "expired" ? styles.sessionTextExpired
-                                : styles.sessionTextInactive
-                            }>
-                              {status === "active"
-                                ? `ログイン済み (~${new Date(s!.expiresAt!).toLocaleDateString("ja-JP")})`
-                                : status === "expired"
-                                ? "期限切れ"
-                                : "未ログイン"}
-                            </Text>
-                          </View>
-                        );
-                      })()}
+                  return (
+                    <View>
+                      {/* Auth method buttons — always show all 3 */}
+                      <View style={styles.authMethodRow}>
+                        {allMethods.map((m) => {
+                          const enabled = availableMethods.includes(m);
+                          const active = isExpanded && loginMethodTab === m;
+                          return (
+                            <TouchableOpacity
+                              key={m}
+                              activeOpacity={enabled ? 0.7 : 1}
+                              style={[
+                                styles.methodBtn,
+                                enabled
+                                  ? active ? styles.methodBtnActive : styles.methodBtnEnabled
+                                  : styles.methodBtnDisabled,
+                              ]}
+                              disabled={!enabled}
+                              onPress={() => {
+                                if (active) {
+                                  setExpandedPluginId(null);
+                                } else {
+                                  setExpandedPluginId(p.id);
+                                  setLoginMethodTab(m);
+                                  setNewAccEmail(pluginAccount?.label ?? "");
+                                  setNewAccPassword("");
+                                  setCookieValues({});
+                                  setCookieExpires({});
+                                  setEditingCredentials(false);
+                                }
+                              }}
+                            >
+                              <Ionicons
+                                name={LOGIN_METHOD_INFO[m].icon as any}
+                                size={14}
+                                color={active ? colors.accentLight : enabled ? colors.textSemi : colors.textDim}
+                              />
+                              <Text style={[
+                                styles.methodBtnText,
+                                active && styles.methodBtnTextActive,
+                                !enabled && styles.methodBtnTextDisabled,
+                              ]}>
+                                {LOGIN_METHOD_INFO[m].short}
+                              </Text>
+                              {enabled && (
+                                <Ionicons
+                                  name={active ? "chevron-up" : "chevron-down"}
+                                  size={10}
+                                  color={active ? colors.accentLight : colors.textMuted}
+                                />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
 
-                      <View style={styles.sessionActions}>
-                        <TouchableOpacity
-                          style={styles.sessionTextBtn}
-                          onPress={() => loginMutation.mutate(pluginAccount.id)}
-                          disabled={loginMutation.isPending}
-                        >
-                          {loginMutation.isPending && loginMutation.variables === pluginAccount.id ? (
-                            <ActivityIndicator color={colors.accentLight} size="small" />
-                          ) : (
-                            <Text style={styles.sessionTextBtnLabel}>
-                              {pluginAccount.session?.hasCookies ? "再ログイン" : "ログイン"}
-                            </Text>
-                          )}
-                        </TouchableOpacity>
-                        {pluginAccount.session?.hasCookies && (
+                      {/* Cookie status */}
+                      <View style={styles.cookieStatusRow}>
+                        <View style={[
+                          styles.cookieStatusBadge,
+                          cookieStatus === "active" ? styles.sessionActive
+                            : cookieStatus === "expired" ? styles.sessionExpired
+                            : styles.sessionInactive,
+                        ]}>
+                          <View style={[styles.sessionDot, {
+                            backgroundColor: cookieStatus === "active" ? colors.success
+                              : cookieStatus === "expired" ? colors.warning
+                              : colors.textMuted,
+                          }]} />
+                          <Text style={styles.cookieStatusLabel}>Cookie</Text>
+                          <Text style={
+                            cookieStatus === "active" ? styles.sessionTextActive
+                              : cookieStatus === "expired" ? styles.sessionTextExpired
+                              : styles.sessionTextInactive
+                          }>
+                            {cookieStatus === "active"
+                              ? s?.expiresAt
+                                ? `有効 (~${new Date(s.expiresAt).toLocaleDateString("ja-JP")})`
+                                : "有効"
+                              : cookieStatus === "expired"
+                              ? "期限切れ"
+                              : "未取得"}
+                          </Text>
+                        </View>
+                        {hasCookies && (
                           <TouchableOpacity
-                            style={styles.sessionTextBtn}
-                            onPress={() => clearSessionMutation.mutate(pluginAccount.id)}
+                            style={styles.cookieClearBtn}
+                            onPress={() => clearSessionMutation.mutate(pluginAccount!.id)}
                             disabled={clearSessionMutation.isPending}
                           >
-                            <Text style={styles.sessionTextBtnLabelDanger}>破棄</Text>
+                            <Ionicons name="trash-outline" size={12} color={colors.error} />
+                            <Text style={styles.cookieClearText}>クリア</Text>
                           </TouchableOpacity>
                         )}
                       </View>
-                    </View>
-                  </View>
-                )}
 
-                {needsAuth && !pluginAccount && !isExpanded && (
-                  <TouchableOpacity
-                    style={styles.loginBtn}
-                    onPress={() => {
-                      setExpandedPluginId(p.id);
-                      setNewAccEmail("");
-                      setNewAccPassword("");
-                    }}
-                  >
-                    <Ionicons name="log-in-outline" size={14} color={colors.accentLight} />
-                    <Text style={styles.loginBtnText}>ログイン</Text>
-                  </TouchableOpacity>
-                )}
+                      {/* Expanded form for selected method */}
+                      {isExpanded && (
+                        <View style={styles.loginForm}>
+                          {/* Credentials form */}
+                          {loginMethodTab === "credentials" && (() => {
+                            const hasCredentials = !!pluginAccount?.label;
+                            return (hasCredentials && !editingCredentials) ? (
+                              <>
+                                <View style={styles.credentialSummary}>
+                                  <View style={styles.credentialSummaryRow}>
+                                    <Ionicons name="mail-outline" size={13} color={colors.textMuted} />
+                                    <Text style={styles.credentialSummaryValue}>{pluginAccount.label}</Text>
+                                  </View>
+                                  <View style={styles.credentialSummaryRow}>
+                                    <Ionicons name="lock-closed-outline" size={13} color={colors.textMuted} />
+                                    <Text style={styles.credentialSummaryValue}>••••••••</Text>
+                                  </View>
+                                  <View style={styles.credentialSummaryActions}>
+                                    <TouchableOpacity
+                                      style={styles.credentialSecondaryBtn}
+                                      onPress={() => setEditingCredentials(true)}
+                                    >
+                                      <Ionicons name="create-outline" size={12} color={colors.accentLight} />
+                                      <Text style={styles.credentialSecondaryBtnText}>編集</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                      style={styles.credentialSecondaryBtn}
+                                      onPress={() => deleteAccountMutation.mutate(pluginAccount.id)}
+                                      disabled={deleteAccountMutation.isPending}
+                                    >
+                                      <Ionicons name="trash-outline" size={12} color={colors.error} />
+                                      <Text style={styles.credentialDeleteBtnText}>削除</Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                <View style={styles.loginFormButtons}>
+                                  <TouchableOpacity
+                                    style={styles.cancelBtn}
+                                    onPress={() => setExpandedPluginId(null)}
+                                  >
+                                    <Text style={styles.cancelBtnText}>閉じる</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.btn, { flex: 1 }]}
+                                    onPress={() => loginMutation.mutate(pluginAccount.id)}
+                                    disabled={loginMutation.isPending}
+                                  >
+                                    {loginMutation.isPending ? (
+                                      <ActivityIndicator color={colors.white} size="small" />
+                                    ) : (
+                                      <Text style={styles.btnText}>再ログイン</Text>
+                                    )}
+                                  </TouchableOpacity>
+                                </View>
+                              </>
+                            ) : (
+                              <>
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="メールアドレス"
+                                  placeholderTextColor={colors.textMuted}
+                                  value={newAccEmail}
+                                  onChangeText={setNewAccEmail}
+                                  autoCapitalize="none"
+                                  keyboardType="email-address"
+                                />
+                                <TextInput
+                                  style={styles.input}
+                                  placeholder="パスワード"
+                                  placeholderTextColor={colors.textMuted}
+                                  value={newAccPassword}
+                                  onChangeText={setNewAccPassword}
+                                  secureTextEntry
+                                />
+                                <View style={styles.loginFormButtons}>
+                                  <TouchableOpacity
+                                    style={styles.cancelBtn}
+                                    onPress={() => {
+                                      if (hasCredentials) {
+                                        setEditingCredentials(false);
+                                      } else {
+                                        setExpandedPluginId(null);
+                                      }
+                                    }}
+                                  >
+                                    <Text style={styles.cancelBtnText}>キャンセル</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.btn, styles.btnGreen, { flex: 1 }]}
+                                    onPress={() =>
+                                      pluginAccount
+                                        ? updateAccountMutation.mutate(pluginAccount.id)
+                                        : addAccountMutation.mutate({ pluginId: p.id, method: "credentials" })
+                                    }
+                                    disabled={
+                                      addAccountMutation.isPending ||
+                                      updateAccountMutation.isPending ||
+                                      !newAccEmail ||
+                                      !newAccPassword
+                                    }
+                                  >
+                                    {addAccountMutation.isPending || updateAccountMutation.isPending ? (
+                                      <ActivityIndicator color={colors.white} size="small" />
+                                    ) : (
+                                      <Text style={styles.btnText}>
+                                        {pluginAccount ? "更新" : "ログイン"}
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                </View>
+                              </>
+                            );
+                          })()}
 
-                {needsAuth && isExpanded && (
-                  <View style={styles.loginForm}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="メールアドレス"
-                      placeholderTextColor={colors.textMuted}
-                      value={newAccEmail}
-                      onChangeText={setNewAccEmail}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                    />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="パスワード"
-                      placeholderTextColor={colors.textMuted}
-                      value={newAccPassword}
-                      onChangeText={setNewAccPassword}
-                      secureTextEntry
-                    />
-                    <View style={styles.loginFormButtons}>
-                      <TouchableOpacity
-                        style={styles.cancelBtn}
-                        onPress={() => setExpandedPluginId(null)}
-                      >
-                        <Text style={styles.cancelBtnText}>キャンセル</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.btn, styles.btnGreen, { flex: 1 }]}
-                        onPress={() =>
-                          pluginAccount
-                            ? updateAccountMutation.mutate(pluginAccount.id)
-                            : addAccountMutation.mutate(p.id)
-                        }
-                        disabled={
-                          addAccountMutation.isPending ||
-                          updateAccountMutation.isPending ||
-                          !newAccEmail ||
-                          !newAccPassword
-                        }
-                      >
-                        {addAccountMutation.isPending ||
-                        updateAccountMutation.isPending ? (
-                          <ActivityIndicator color={colors.white} size="small" />
-                        ) : (
-                          <Text style={styles.btnText}>
-                            {pluginAccount ? "更新" : "ログイン"}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
+                          {/* Browser login */}
+                          {loginMethodTab === "browser" && (
+                            <>
+                              <Text style={styles.cookieHint}>
+                                サーバー側でブラウザが開きます。表示されたブラウザでログインするとCookieが保存されます。
+                              </Text>
+                              <View style={styles.loginFormButtons}>
+                                <TouchableOpacity
+                                  style={styles.cancelBtn}
+                                  onPress={() => setExpandedPluginId(null)}
+                                >
+                                  <Text style={styles.cancelBtnText}>キャンセル</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.btn, styles.btnGreen, { flex: 1 }]}
+                                  onPress={() => {
+                                    if (pluginAccount) {
+                                      loginMutation.mutate(pluginAccount.id);
+                                      setExpandedPluginId(null);
+                                    } else {
+                                      addAccountMutation.mutate({ pluginId: p.id, method: "browser" });
+                                    }
+                                  }}
+                                  disabled={addAccountMutation.isPending || loginMutation.isPending}
+                                >
+                                  {addAccountMutation.isPending || loginMutation.isPending ? (
+                                    <ActivityIndicator color={colors.white} size="small" />
+                                  ) : (
+                                    <Text style={styles.btnText}>ブラウザを開く</Text>
+                                  )}
+                                </TouchableOpacity>
+                              </View>
+                            </>
+                          )}
+
+                          {/* Cookie import */}
+                          {loginMethodTab === "cookie_import" && (() => {
+                            const cookieNames = p.authCookieNames ?? [];
+                            const hasCookieData = cookieNames.some((n) => cookieValues[n]?.trim());
+                            return (
+                              <>
+                                <View style={styles.cookieHintBlock}>
+                                  <Text style={styles.cookieHint}>
+                                    {"1. "}
+                                    {p.authUrl ? (
+                                      <Text
+                                        style={styles.cookieHintLink}
+                                        onPress={() => Linking.openURL(p.authUrl!)}
+                                      >
+                                        {p.authUrl}
+                                      </Text>
+                                    ) : (
+                                      <Text>サイト</Text>
+                                    )}
+                                    {" にログイン済みの状態でアクセス"}
+                                  </Text>
+                                  <Text style={styles.cookieHint}>
+                                    {"2. DevTools > Application > Cookies から以下の Value と Expires をコピー"}
+                                  </Text>
+                                </View>
+                                {cookieNames.map((name) => (
+                                  <View key={name} style={styles.cookieFieldGroup}>
+                                    <Text style={styles.cookieFieldLabel}>{name}</Text>
+                                    <TextInput
+                                      style={styles.input}
+                                      placeholder="Value"
+                                      placeholderTextColor={colors.textMuted}
+                                      value={cookieValues[name] ?? ""}
+                                      onChangeText={(v) => setCookieValues((prev) => ({ ...prev, [name]: v }))}
+                                      autoCapitalize="none"
+                                    />
+                                    <TextInput
+                                      style={styles.input}
+                                      placeholder="Expires (例: 2027-04-22T04:32:37.832Z)"
+                                      placeholderTextColor={colors.textMuted}
+                                      value={cookieExpires[name] ?? ""}
+                                      onChangeText={(v) => setCookieExpires((prev) => ({ ...prev, [name]: v }))}
+                                      autoCapitalize="none"
+                                    />
+                                  </View>
+                                ))}
+                                <View style={styles.loginFormButtons}>
+                                  <TouchableOpacity
+                                    style={styles.cancelBtn}
+                                    onPress={() => setExpandedPluginId(null)}
+                                  >
+                                    <Text style={styles.cancelBtnText}>キャンセル</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.btn, styles.btnGreen, { flex: 1 }]}
+                                    onPress={() => {
+                                      if (pluginAccount) {
+                                        importCookiesMutation.mutate(pluginAccount.id);
+                                      } else {
+                                        addAccountMutation.mutate({ pluginId: p.id, method: "cookie_import" });
+                                      }
+                                    }}
+                                    disabled={
+                                      importCookiesMutation.isPending ||
+                                      addAccountMutation.isPending ||
+                                      !hasCookieData
+                                    }
+                                  >
+                                    {importCookiesMutation.isPending || addAccountMutation.isPending ? (
+                                      <ActivityIndicator color={colors.white} size="small" />
+                                    ) : (
+                                      <Text style={styles.btnText}>
+                                        {pluginAccount ? "インポート" : "インポート"}
+                                      </Text>
+                                    )}
+                                  </TouchableOpacity>
+                                </View>
+                              </>
+                            );
+                          })()}
+                        </View>
+                      )}
                     </View>
-                  </View>
-                )}
+                  );
+                })()}
 
                 {!needsAuth && (
                   <Text style={styles.noAuthHint}>ログイン不要</Text>
@@ -505,6 +850,75 @@ export default function SettingsScreen() {
       </View>
 
       <View style={{ height: 40 }} />
+
+      {/* Auth methods help modal */}
+      <Modal
+        visible={showAuthInfo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAuthInfo(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAuthInfo(false)}
+        >
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>認証の仕組み</Text>
+
+            {/* Overview */}
+            <View style={styles.modalOverviewBox}>
+              <Ionicons name="information-circle-outline" size={14} color={colors.accentLight} style={{ marginTop: 2 }} />
+              <Text style={styles.modalOverviewText}>
+                どの方式でログインしても、結果としてCookieがサーバーに保存されます。
+                保存されたCookieはメタデータ取得やダウンロードに共通で使われます。
+              </Text>
+            </View>
+
+            <View style={styles.modalDivider} />
+
+            {/* Method cards */}
+            {ALL_LOGIN_METHODS.map((m) => {
+              const info = LOGIN_METHOD_INFO[m];
+              return (
+                <View key={m} style={styles.methodInfoItem}>
+                  <View style={styles.methodInfoHeader}>
+                    <Ionicons name={info.icon as any} size={14} color={colors.accentLight} />
+                    <Text style={styles.methodInfoTitle}>{info.label}</Text>
+                    {info.auto ? (
+                      <View style={styles.autoRecoverBadge}>
+                        <Ionicons name="refresh-outline" size={10} color={colors.success} />
+                        <Text style={styles.autoRecoverText}>自動復旧</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.manualBadge}>
+                        <Text style={styles.manualBadgeText}>手動更新</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.methodInfoBody}>
+                    <View style={styles.methodInfoRow}>
+                      <Text style={styles.methodInfoArrow}>→</Text>
+                      <Text style={styles.methodInfoDesc}>{info.how}</Text>
+                    </View>
+                    <View style={styles.methodInfoRow}>
+                      <Text style={styles.methodInfoArrow}>→</Text>
+                      <Text style={styles.methodInfoDesc}>期限切れ時: {info.onExpiry}</Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setShowAuthInfo(false)}
+            >
+              <Text style={styles.modalCloseBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
@@ -617,35 +1031,77 @@ const styles = StyleSheet.create({
   },
   contentTypeBadgeText: { fontSize: 11, fontWeight: "600", color: colors.textMuted },
 
-  // Plugin account
-  pluginAccountRow: {
+  // Cookie status
+  cookieStatusRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "space-between",
     marginTop: 8,
   },
-  pluginAccountEmail: { color: colors.textSemi, fontSize: 13, flex: 1 },
-  activeBadge: {
+  cookieStatusBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    borderRadius: 4,
+    gap: 5,
     paddingHorizontal: 8,
     paddingVertical: 3,
+    borderRadius: 4,
   },
-  activeBadgeOn: { backgroundColor: colors.successBg },
-  activeBadgeOff: { backgroundColor: colors.neutralBg },
-  activeDot: { width: 6, height: 6, borderRadius: 3 },
-  activeTextOn: { color: colors.success, fontSize: 11, fontWeight: "600" },
-  activeTextOff: { color: colors.neutral, fontSize: 11, fontWeight: "600" },
-  loginBtn: {
+  cookieStatusLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    marginRight: 2,
+  },
+  cookieClearBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    marginTop: 8,
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  loginBtnText: { color: colors.accentLight, fontSize: 13, fontWeight: "600" },
+  cookieClearText: {
+    color: colors.error,
+    fontSize: 11,
+    fontWeight: "600",
+  },
   loginForm: { marginTop: 10 },
+  credentialSummary: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.sm,
+    padding: 10,
+    gap: 6,
+    marginBottom: 8,
+  },
+  credentialSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  credentialSummaryValue: {
+    color: colors.textSemi,
+    fontSize: 13,
+  },
+  credentialSummaryActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 4,
+  },
+  credentialSecondaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  credentialSecondaryBtnText: {
+    color: colors.accentLight,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  credentialDeleteBtnText: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   loginFormButtons: {
     flexDirection: "row",
     gap: 8,
@@ -656,20 +1112,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cancelBtnText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
-  sessionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 6,
-  },
-  sessionBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
   sessionActive: { backgroundColor: colors.successBg },
   sessionExpired: { backgroundColor: colors.warningBg },
   sessionInactive: { backgroundColor: colors.neutralBgDark },
@@ -677,18 +1119,186 @@ const styles = StyleSheet.create({
   sessionTextActive: { color: colors.success, fontSize: 11, fontWeight: "600" },
   sessionTextExpired: { color: colors.warning, fontSize: 11, fontWeight: "600" },
   sessionTextInactive: { color: colors.textMuted, fontSize: 11, fontWeight: "600" },
-  sessionActions: {
-    flexDirection: "row",
-    alignItems: "center",
+  noAuthHint: { color: colors.textMuted, fontSize: 12, marginTop: 6 },
+  cookieHintBlock: {
+    marginBottom: 10,
     gap: 2,
   },
-  sessionTextBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  cookieHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
-  sessionTextBtnLabel: { color: colors.accentLight, fontSize: 12, fontWeight: "600" },
-  sessionTextBtnLabelDanger: { color: colors.error, fontSize: 12, fontWeight: "600" },
-  noAuthHint: { color: colors.textMuted, fontSize: 12, marginTop: 6 },
+  cookieHintLink: {
+    color: colors.accentLight,
+    textDecorationLine: "underline" as const,
+  },
+  cookieFieldGroup: {
+    marginBottom: 4,
+  },
+  cookieFieldLabel: {
+    color: colors.accentLight,
+    fontSize: 12,
+    fontWeight: "700",
+    fontFamily: "monospace" as any,
+    marginBottom: 4,
+  },
+  authMethodRow: {
+    flexDirection: "row",
+    gap: 7,
+    marginTop: 8,
+  },
+  methodBtn: {
+    width: 95,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  methodBtnEnabled: {
+    backgroundColor: colors.bgElevated,
+    borderColor: colors.borderLight,
+  },
+  methodBtnDisabled: {
+    backgroundColor: "transparent",
+  },
+  methodBtnActive: {
+    backgroundColor: colors.accentDim,
+    borderColor: colors.accent,
+  },
+  methodBtnText: {
+    color: colors.textSemi,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  methodBtnTextActive: {
+    color: colors.accentLight,
+  },
+  methodBtnTextDisabled: {
+    color: colors.textDim,
+    fontSize: 10,
+  },
+  manualBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: colors.warningBg,
+  },
+  manualBadgeText: {
+    color: colors.warning,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  autoRecoverBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: colors.successBg,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  autoRecoverText: {
+    color: colors.success,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
+    padding: 20,
+    width: "100%",
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  modalOverviewBox: {
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: colors.bg,
+    borderRadius: radius.sm,
+    padding: 12,
+    marginBottom: 14,
+  },
+  modalOverviewText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 19,
+    flex: 1,
+  },
+  methodInfoItem: {
+    marginBottom: 14,
+  },
+  methodInfoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  methodInfoTitle: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: "700",
+    flex: 1,
+  },
+  methodInfoBody: {
+    paddingLeft: 20,
+    gap: 2,
+  },
+  methodInfoRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  methodInfoDesc: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    flex: 1,
+  },
+  methodInfoArrow: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginBottom: 12,
+  },
+  modalNote: {
+    color: colors.textMuted,
+    fontSize: 11,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  modalCloseBtn: {
+    alignSelf: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  modalCloseBtnText: {
+    color: colors.accentLight,
+    fontSize: 14,
+    fontWeight: "600",
+  },
   fieldLabelRow: {
     flexDirection: "row",
     alignItems: "center",

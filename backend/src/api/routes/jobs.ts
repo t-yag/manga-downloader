@@ -4,6 +4,7 @@ import { eq, desc } from "drizzle-orm";
 import { jobQueue } from "../../queue/queue.js";
 import { worker } from "../../queue/worker.js";
 import { registry } from "../../plugins/registry.js";
+import { resolvePluginSession } from "../../plugins/session.js";
 
 export async function jobRoutes(app: FastifyInstance): Promise<void> {
   // List jobs (enriched with title/volume info)
@@ -96,7 +97,8 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
     if (!libraryEntry && plugin.metadata) {
       try {
-        const titleInfo = await plugin.metadata.getTitleInfo(titleId);
+        const session = await resolvePluginSession(pluginId);
+        const titleInfo = await plugin.metadata.getTitleInfo(titleId, session);
         const result = db
           .insert(schema.library)
           .values({

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { db, schema } from "../../db/index.js";
 import { eq, desc, asc, and, inArray, like, sql, or } from "drizzle-orm";
 import { registry } from "../../plugins/registry.js";
+import { resolvePluginSession } from "../../plugins/session.js";
 import type { VolumeAvailability } from "../../plugins/base.js";
 import { jobQueue } from "../../queue/queue.js";
 import { logger } from "../../logger.js";
@@ -26,7 +27,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
       let titleInfo = null;
       if (plugin?.metadata) {
-        titleInfo = await plugin.metadata.getTitleInfo(parsed.titleId);
+        const session = await resolvePluginSession(parsed.pluginId);
+        titleInfo = await plugin.metadata.getTitleInfo(parsed.titleId, session);
       }
 
       return {
@@ -243,13 +245,34 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const titleInfo = await plugin.metadata.getTitleInfo(resolvedTitleId);
+      const session = await resolvePluginSession(resolvedPluginId);
+      const titleInfo = await plugin.metadata.getTitleInfo(resolvedTitleId, session);
+
+      // Use the canonical titleId from metadata (e.g. Kindle series ASIN)
+      const canonicalTitleId = titleInfo.titleId ?? resolvedTitleId;
+
+      // Re-check for duplicates with the canonical titleId
+      if (canonicalTitleId !== resolvedTitleId) {
+        const existingCanonical = db
+          .select()
+          .from(schema.library)
+          .where(
+            and(
+              eq(schema.library.pluginId, resolvedPluginId),
+              eq(schema.library.titleId, canonicalTitleId)
+            )
+          )
+          .get();
+        if (existingCanonical) {
+          return reply.status(409).send({ error: "Title already in library", id: existingCanonical.id });
+        }
+      }
 
       const result = db
         .insert(schema.library)
         .values({
           pluginId: resolvedPluginId,
-          titleId: resolvedTitleId,
+          titleId: canonicalTitleId,
           title: titleInfo.seriesTitle,
           author: titleInfo.author,
           genres: JSON.stringify(titleInfo.genres),
@@ -401,7 +424,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const titleInfo = await plugin.metadata.getTitleInfo(title.titleId);
+      const session = await resolvePluginSession(title.pluginId);
+      const titleInfo = await plugin.metadata.getTitleInfo(title.titleId, session);
 
       // Update library entry (respect user overrides)
       const syncUpdates: Record<string, unknown> = {
@@ -540,12 +564,14 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           }
         }
 
+        const canAutoRelogin = plugin.manifest?.loginMethods?.includes("credentials") ?? false;
+
         if (sessionValid) {
           session = plugin.auth.getSession();
-        } else if (account.credentials) {
-          // Re-login if session is missing or invalid
+        } else if (canAutoRelogin) {
+          // Re-login only if plugin supports credentials-based login
           log.info(`Session invalid for account #${account.id}, re-logging in...`);
-          const credentials = JSON.parse(account.credentials);
+          const credentials = JSON.parse(account.credentials ?? "{}");
           const success = await plugin.auth.login(credentials);
           if (!success) {
             return reply.status(401).send({ error: "ログインに失敗しました。認証情報を確認してください" });
@@ -559,7 +585,7 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           }
           session = plugin.auth.getSession();
         } else {
-          return reply.status(401).send({ error: "セッションが無効で、認証情報も未設定です" });
+          return reply.status(401).send({ error: "セッションが無効です。アカウント設定からログインしてください" });
         }
 
         log.info(`Session: ${session ? `${session.cookies.length} cookies` : "null"}`);
@@ -645,6 +671,9 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
     const plugin = registry.get(title.pluginId);
 
+    // Whether this plugin supports automatic re-login via credentials
+    const canAutoRelogin = plugin?.manifest.loginMethods?.includes("credentials") ?? false;
+
     // Helper: resolve session for availability checking
     // Returns session on success, null if no account/plugin, throws on auth failure.
     async function resolveSession() {
@@ -663,9 +692,9 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
       }
       if (sessionValid) return plugin.auth.getSession();
 
-      // Session invalid or missing — attempt re-login
-      if (!account.credentials) {
-        throw new Error("セッションが無効で、認証情報も未設定です");
+      // Session invalid or missing — attempt re-login only if plugin supports credentials login
+      if (!canAutoRelogin) {
+        throw new Error("セッションが無効です。アカウント設定からログインしてください");
       }
       log.info(`Session invalid for account #${account.id}, re-logging in...`);
       const credentials = JSON.parse(account.credentials);
@@ -685,13 +714,17 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
     // Helper: force re-login (invalidate current session and login again)
     async function forceRelogin() {
       if (!accountId || !plugin?.auth) return null;
+      if (!canAutoRelogin) {
+        throw new Error("セッションが無効です。アカウント設定からログインしてください");
+      }
       const account = db
         .select()
         .from(schema.accounts)
         .where(eq(schema.accounts.id, accountId))
         .get();
-      if (!account?.credentials) {
-        throw new Error("セッションが無効で、認証情報も未設定です");
+      if (!account) return null;
+      if (!account.credentials) {
+        throw new Error("セッションが無効です。アカウント設定からログインしてください");
       }
       log.info(`Force re-login for account #${account.id}...`);
       const credentials = JSON.parse(account.credentials);
@@ -815,7 +848,8 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
 
     let titleInfo;
     try {
-      titleInfo = await plugin.metadata.getTitleInfo(title.titleId);
+      const metaSession = await resolveSession().catch(() => null);
+      titleInfo = await plugin.metadata.getTitleInfo(title.titleId, metaSession);
     } catch (error) {
       if (isStandalone) {
         // Source unreachable → mark "available" volumes as "unavailable"
@@ -844,7 +878,10 @@ export async function libraryRoutes(app: FastifyInstance): Promise<void> {
           availableCount: 0,
         };
       }
-      throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error(error, `Metadata fetch failed during sync for titleId=${title.titleId}`);
+      const status = msg.includes("ログイン") || msg.includes("セッション") || msg.includes("認証") ? 401 : 500;
+      return reply.status(status).send({ error: msg });
     }
 
     const syncUpdates2: Record<string, unknown> = {
