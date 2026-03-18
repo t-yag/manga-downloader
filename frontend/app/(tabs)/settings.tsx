@@ -99,7 +99,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
-      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})");
+      setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/\\[{author}\\] {title} 第{volume:2}{unit_ja}[ - ({tags})]");
     }
   }, [settings]);
 
@@ -393,13 +393,24 @@ export default function SettingsScreen() {
                 <Text style={styles.templateInfoDesc}>{desc}</Text>
               </View>
             ))}
+            <Text style={[styles.templateInfoTitle, { marginTop: 8 }]}>構文</Text>
+            {[
+              ["[ ... ]", "optionalブロック — 中の変数がすべて空なら丸ごと省略"],
+              ["\\[ \\]", "リテラルの角括弧（エスケープ）"],
+              ["\\\\", "リテラルのバックスラッシュ"],
+            ].map(([variable, desc]) => (
+              <View key={variable} style={styles.templateInfoRow}>
+                <Text style={styles.templateInfoVar}>{variable}</Text>
+                <Text style={styles.templateInfoDesc}>{desc}</Text>
+              </View>
+            ))}
           </View>
         )}
         <TextInput
           style={styles.input}
           value={pathTemplate}
           onChangeText={setPathTemplate}
-          placeholder="{title}/[{author}] {title} 第{volume:2}{unit_ja} - ({tags})"
+          placeholder="{title}/\[{author}\] {title} 第{volume:2}{unit_ja}[ - ({tags})]"
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
         />
@@ -413,7 +424,11 @@ export default function SettingsScreen() {
             .replace(/\{unit\}/g, "vol")
             .replace(/\{author\}/g, "著者名")
             .replace(/\{tags\}/g, "タグ1 タグ2")
-            .replace(/\{tags_comma\}/g, "タグ1,タグ2")}.zip
+            .replace(/\{tags_comma\}/g, "タグ1,タグ2")
+            .replace(/\\\[/g, "[")
+            .replace(/\\\]/g, "]")
+            .replace(/\\\\/g, "\\")
+            .replace(/\[([^\]]*)\]/g, "$1")}.zip
         </Text>
         <TouchableOpacity
           style={[styles.btn, { marginTop: 4 }]}
