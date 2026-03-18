@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   "download.basePath": "./data/downloads",
-  "download.pathTemplate": "{title}_vol_{volume}",
+  "download.pathTemplate": "{title}/\\[{author}\\] {title} 第{volume:2}{unit_ja}[ - ({tags})]",
   "download.concurrency": 1,
   "download.retryCount": 3,
   "download.requestInterval": 0,
