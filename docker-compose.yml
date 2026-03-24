@@ -4,7 +4,7 @@ services:
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     volumes:
-      - ./data:/app/data
+      - ./backend/data:/app/data
     environment:
       - PORT=3000
     restart: unless-stopped

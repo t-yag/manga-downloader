@@ -57,10 +57,10 @@ docker-compose down
 
 #### データ永続化
 
-`./data/` がコンテナの `/app/data` にバインドマウントされます。
+`./backend/data/` がコンテナの `/app/data` にバインドマウントされます。ローカル開発時と同じディレクトリを共有します。
 
 ```
-data/
+backend/data/
   db/          # SQLite データベース
   cookies/     # セッション cookie
   downloads/   # ダウンロード済みファイル
