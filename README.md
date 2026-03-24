@@ -32,23 +32,69 @@
 
 ## セットアップ
 
-### 必要なもの
+### Docker (推奨)
+
+```bash
+# 全体起動（backend + frontend）
+docker-compose up -d
+
+# バックエンドのみ
+docker-compose up -d backend
+
+# フロントエンドのみ
+docker-compose up -d frontend
+
+# 停止
+docker-compose down
+```
+
+| URL | 用途 |
+|-----|------|
+| `http://localhost:3000` | バックエンド API |
+| `http://localhost:8080` | フロントエンド Web UI |
+
+ポートは `.env` で変更可能です（`.env.example` 参照）。
+
+#### データ永続化
+
+`./data/` がコンテナの `/app/data` にバインドマウントされます。
+
+```
+data/
+  db/          # SQLite データベース
+  cookies/     # セッション cookie
+  downloads/   # ダウンロード済みファイル
+```
+
+#### フロントエンドからバックエンドへの接続
+
+フロントエンドの設定画面でサーバーURLを指定します。
+
+- 同一マシンで起動: `http://localhost:3000`
+- 別マシンのバックエンド: `http://<host>:<port>`
+
+#### マルチアーキテクチャ
+
+`linux/amd64` と `linux/arm64` に対応しています。ローカルではネイティブアーキで自動ビルドされます。
+
+### ローカル開発
+
+#### 必要なもの
 
 - Node.js 20+
 - pnpm
 
-### バックエンド
+#### バックエンド
 
 ```bash
 cd backend
 pnpm install
-cp .env.example .env  # 必要に応じて編集
 pnpm dev
 ```
 
 APIサーバーが `http://localhost:3000` で起動します。
 
-### フロントエンド
+#### フロントエンド
 
 ```bash
 cd frontend

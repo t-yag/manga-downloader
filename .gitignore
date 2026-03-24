@@ -25,6 +25,7 @@ backend/dist/
 
 # Runtime data (DB, cookies, downloads)
 backend/data/
+data/
 
 # Docs (local only)
 docs/
