@@ -14,6 +14,7 @@ export interface QueuedJob {
   retryCount: number;
   message: string | null;
   error: string | null;
+  source: string | null;
 }
 
 /**
@@ -29,6 +30,7 @@ export class JobQueue {
     accountId?: number;
     volumeId?: number;
     priority?: number;
+    source?: string;
   }): Promise<number> {
     // Capture the current volume status before changing it
     let prevVolumeStatus: string | null = null;
@@ -51,6 +53,7 @@ export class JobQueue {
         status: "pending",
         progress: 0,
         prevVolumeStatus,
+        source: params.source ?? null,
       })
       .returning({ id: schema.jobs.id })
       .get();

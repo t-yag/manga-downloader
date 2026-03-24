@@ -4,6 +4,7 @@ import { createApp } from "./api/index.js";
 import { worker } from "./queue/worker.js";
 import { registry } from "./plugins/registry.js";
 import { initDatabase } from "./db/init.js";
+import { startDiscordBot, stopDiscordBot } from "./discord/bot.js";
 
 // Import plugins
 import { createCmoaPlugin } from "./plugins/cmoa/index.js";
@@ -39,10 +40,14 @@ async function main() {
   // Start download worker
   worker.start();
 
+  // Start Discord bot (if enabled via settings)
+  await startDiscordBot();
+
   // Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down...");
     worker.stop();
+    await stopDiscordBot();
     await registry.disposeAll();
     await app.close();
     process.exit(0);

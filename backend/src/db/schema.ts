@@ -78,6 +78,8 @@ export const jobs = sqliteTable("jobs", {
   message: text("message"),
   error: text("error"),
   prevVolumeStatus: text("prev_volume_status"),
+  /** Origin of the job: "web", "discord", "api", etc. */
+  source: text("source"),
   startedAt: text("started_at"),
   finishedAt: text("finished_at"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),

@@ -5,6 +5,7 @@ import { registry } from "../plugins/registry.js";
 import type { DownloadJob, SessionData } from "../plugins/base.js";
 import { getSettingValue } from "../api/routes/settings.js";
 import { resolveOutputPath, zipAndCleanup, removeOldDownload } from "../storage/index.js";
+import { notifyDownloadError, notifyQueueEmpty, resolvePendingReply } from "../discord/notify.js";
 import { logger } from "../logger.js";
 import path from "path";
 import fs from "fs/promises";
@@ -23,6 +24,10 @@ export class Worker {
   private running = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private runningJobs = new Map<number, RunningJob>();
+
+  // Track completed/failed discord-sourced jobs since last queue-empty notification
+  private discordCompleted: { title: string; volume: number; unit: string; filePath?: string }[] = [];
+  private discordFailed: { title: string; volume: number; unit: string; error: string }[] = [];
 
   start(): void {
     if (this.running) return;
@@ -63,7 +68,17 @@ export class Worker {
     if (hasRunning && concurrency <= 1) return;
 
     const job = await jobQueue.dequeue();
-    if (!job) return;
+    if (!job) {
+      // Queue is empty — send summary notification for discord-sourced jobs
+      if (this.discordCompleted.length + this.discordFailed.length > 0) {
+        const completed = [...this.discordCompleted];
+        const failed = [...this.discordFailed];
+        this.discordCompleted = [];
+        this.discordFailed = [];
+        notifyQueueEmpty({ completed, failed }).catch((e) => log.warn(`Queue-empty notification failed: ${e}`));
+      }
+      return;
+    }
 
     log.info(`Processing job #${job.id} (plugin: ${job.pluginId})`);
     await this.processJob(job);
@@ -209,15 +224,31 @@ export class Worker {
       await jobQueue.complete(queuedJob.id, queuedJob.volumeId);
 
       // Update volume file info (point to zip file)
+      const stat = await fs.stat(zipPath).catch(() => null);
       db.update(schema.volumes)
         .set({
           filePath: zipPath,
+          fileSize: stat?.size ?? null,
           downloadedAt: new Date().toISOString(),
         })
         .where(eq(schema.volumes.id, queuedJob.volumeId!))
         .run();
 
       log.info(`Job #${queuedJob.id} completed`);
+
+      if (queuedJob.source === "discord") {
+        this.discordCompleted.push({
+          title: libraryData.title,
+          volume: volumeData.volumeNum,
+          unit: volumeData.unit ?? "vol",
+          filePath: zipPath,
+        });
+        resolvePendingReply(queuedJob.volumeId!, {
+          success: true,
+          filePath: zipPath,
+          fileSize: stat?.size ?? undefined,
+        }).catch((e) => log.warn(`Failed to resolve pending reply: ${e}`));
+      }
     } catch (error) {
       if (abortController.signal.aborted) {
         await this.cleanupPartialDownload(outputDir, zipPath);
@@ -235,6 +266,30 @@ export class Worker {
       } else {
         log.error(`Job #${queuedJob.id} failed: ${message} (no retries left)`);
         await jobQueue.fail(queuedJob.id, message, queuedJob.volumeId);
+
+        if (queuedJob.source === "discord") {
+          this.discordFailed.push({
+            title: libraryData?.title ?? "Unknown",
+            volume: volumeData?.volumeNum ?? 0,
+            unit: volumeData?.unit ?? "vol",
+            error: message,
+          });
+
+          if (queuedJob.volumeId) {
+            resolvePendingReply(queuedJob.volumeId, {
+              success: false,
+              error: message,
+            }).catch((e) => log.warn(`Failed to resolve pending reply: ${e}`));
+          }
+
+          notifyDownloadError({
+            title: libraryData?.title ?? "Unknown",
+            volume: volumeData?.volumeNum ?? 0,
+            unit: volumeData?.unit ?? "vol",
+            plugin: queuedJob.pluginId,
+            error: message,
+          }).catch((e) => log.warn(`Download-error notification failed: ${e}`));
+        }
       }
     } finally {
       this.runningJobs.delete(queuedJob.id);
