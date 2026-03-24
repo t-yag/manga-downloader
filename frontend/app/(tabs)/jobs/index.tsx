@@ -331,7 +331,7 @@ export default function JobsScreen() {
                 <>
                   <View style={styles.modalHeader}>
                     <Ionicons name={cfg.icon} size={18} color={cfg.color} />
-                    <Text style={styles.modalTitle} numberOfLines={2}>{jobLabel}</Text>
+                    <Text style={styles.modalTitle}>{jobLabel}</Text>
                   </View>
                   <View style={styles.modalRows}>
                     <View style={styles.modalRow}>
