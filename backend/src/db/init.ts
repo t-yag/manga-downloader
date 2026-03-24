@@ -83,6 +83,7 @@ export function initDatabase(): void {
       message TEXT,
       error TEXT,
       prev_volume_status TEXT,
+      source TEXT,
       started_at TEXT,
       finished_at TEXT,
       created_at TEXT DEFAULT (datetime('now'))
@@ -112,6 +113,14 @@ export function initDatabase(): void {
     .get() as { cnt: number };
   if (!hasColumn.cnt) {
     sqlite.exec("ALTER TABLE jobs ADD COLUMN prev_volume_status TEXT");
+  }
+
+  // Add source column to jobs
+  const hasSource = sqlite
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('jobs') WHERE name = 'source'")
+    .get() as { cnt: number };
+  if (!hasSource.cnt) {
+    sqlite.exec("ALTER TABLE jobs ADD COLUMN source TEXT");
   }
 
   // Add title_override / author_override columns

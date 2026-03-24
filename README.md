@@ -87,6 +87,16 @@ frontend/
     theme.ts      # デザイントークン
 ```
 
+## Discord 連携（オプション）
+
+BOTをサーバーに招待し、設定画面で Bot Token と Channel ID を入力すると以下の機能が使えます：
+
+- チャンネルにURLを貼るだけでライブラリに追加
+- スラッシュコマンドでキュー操作
+- ダウンロード完了・失敗の通知
+
+**[BOTを招待する](https://discord.com/oauth2/authorize?client_id=1485246396209696909&permissions=76864&integration_type=0&scope=bot+applications.commands)**
+
 ## ライセンス
 
 個人利用を目的としたプロジェクトです。

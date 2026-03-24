@@ -20,9 +20,10 @@ import * as cheerio from "cheerio";
 /**
  * BookLive URL parser
  * Handles:
- *   https://booklive.jp/product/index/title_id/2122098         → title page
- *   https://booklive.jp/product/index/title_id/2122098/vol.2   → volume page
- *   https://booklive.jp/bviewer/?cid=2122098_002               → reader
+ *   https://booklive.jp/product/index/title_id/2122098             → title page
+ *   https://booklive.jp/product/index/title_id/2122098/vol.2       → volume page
+ *   https://booklive.jp/product/index/title_id/2122098/vol_no/002  → volume page (alt)
+ *   https://booklive.jp/bviewer/?cid=2122098_002                   → reader
  */
 class BookLiveUrlParser implements UrlParser {
   canHandle(url: string): boolean {
@@ -41,13 +42,13 @@ class BookLiveUrlParser implements UrlParser {
       };
     }
 
-    // Volume page: /title_id/2122098/vol.2
-    const volMatch = url.match(/title_id\/(\d+)\/vol\.(\d+)/);
+    // Volume page: /title_id/2122098/vol.2 or /title_id/2122098/vol_no/002
+    const volMatch = url.match(/title_id\/(\d+)\/(?:vol\.(\d+)|vol_no\/(\d+))/);
     if (volMatch) {
       return {
         pluginId: "booklive",
         titleId: volMatch[1],
-        volume: parseInt(volMatch[2]),
+        volume: parseInt(volMatch[2] ?? volMatch[3]),
         type: "volume",
       };
     }

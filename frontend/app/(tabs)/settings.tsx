@@ -10,6 +10,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "../../src/toast";
@@ -91,6 +92,12 @@ export default function SettingsScreen() {
   const [pathTemplate, setPathTemplate] = useState("");
   const [showTemplateInfo, setShowTemplateInfo] = useState(false);
 
+  // Discord settings
+  const [discordBotToken, setDiscordBotToken] = useState("");
+  const [discordChannelId, setDiscordChannelId] = useState("");
+  const [discordBotEnabled, setDiscordBotEnabled] = useState(false);
+  const [showBotToken, setShowBotToken] = useState(false);
+
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
@@ -100,8 +107,25 @@ export default function SettingsScreen() {
     if (settings) {
       setBasePath((settings["download.basePath"] as string) ?? "./data/downloads");
       setPathTemplate((settings["download.pathTemplate"] as string) ?? "{title}/\\[{author}\\] {title} 第{volume:2}{unit_ja}[ - ({tags})]");
+      setDiscordBotToken((settings["discord.botToken"] as string) ?? "");
+      setDiscordChannelId((settings["discord.channelId"] as string) ?? "");
+      setDiscordBotEnabled((settings["discord.botEnabled"] as boolean) ?? false);
     }
   }, [settings]);
+
+  // Dirty detection for save buttons
+  const downloadSettingsChanged =
+    connected === true &&
+    settings != null &&
+    (basePath !== ((settings["download.basePath"] as string) ?? "./data/downloads") ||
+      pathTemplate !== ((settings["download.pathTemplate"] as string) ?? "{title}/\\[{author}\\] {title} 第{volume:2}{unit_ja}[ - ({tags})]"));
+
+  const discordSettingsChanged =
+    connected === true &&
+    settings != null &&
+    (discordBotToken !== ((settings["discord.botToken"] as string) ?? "") ||
+      discordChannelId !== ((settings["discord.channelId"] as string) ?? "") ||
+      discordBotEnabled !== ((settings["discord.botEnabled"] as boolean) ?? false));
 
   const { data: accounts = [] } = useQuery({
     queryKey: ["accounts"],
@@ -145,6 +169,35 @@ export default function SettingsScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       toast.success("ダウンロード設定を保存しました。");
+    },
+    onError: (err: Error) => {
+      toast.error("エラー", { description: err.message });
+    },
+  });
+
+  const validateDiscordSettings = (): string | null => {
+    if (discordBotEnabled) {
+      if (!discordBotToken.trim()) return "Botトークンを入力してください。";
+      if (discordBotToken.trim().split(".").length !== 3) return "Botトークンの形式が正しくありません。";
+      if (!discordChannelId.trim()) return "チャンネルIDを入力してください。";
+      if (!/^\d+$/.test(discordChannelId.trim())) return "チャンネルIDは数値で入力してください。";
+    }
+    return null;
+  };
+
+  const updateDiscordSettingsMutation = useMutation({
+    mutationFn: () => {
+      const err = validateDiscordSettings();
+      if (err) return Promise.reject(new Error(err));
+      return updateSettings({
+        "discord.botToken": discordBotToken.trim(),
+        "discord.channelId": discordChannelId.trim(),
+        "discord.botEnabled": discordBotEnabled,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("Discord設定を保存しました。");
     },
     onError: (err: Error) => {
       toast.error("エラー", { description: err.message });
@@ -431,14 +484,74 @@ export default function SettingsScreen() {
             .replace(/\[([^\]]*)\]/g, "$1")}.zip
         </Text>
         <TouchableOpacity
-          style={[styles.btn, { marginTop: 4 }]}
+          style={[styles.btn, { marginTop: 4 }, !downloadSettingsChanged && styles.btnDisabled]}
           onPress={() => updateDownloadSettingsMutation.mutate()}
-          disabled={updateDownloadSettingsMutation.isPending}
+          disabled={!downloadSettingsChanged || updateDownloadSettingsMutation.isPending}
         >
           {updateDownloadSettingsMutation.isPending ? (
             <ActivityIndicator color={colors.white} size="small" />
           ) : (
-            <Text style={styles.btnText}>保存</Text>
+            <Text style={[styles.btnText, !downloadSettingsChanged && styles.btnTextDisabled]}>保存</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Discord Settings */}
+      <View style={styles.sectionHeaderRow}>
+        <Ionicons name="logo-discord" size={16} color={colors.textSecondary} />
+        <Text style={styles.sectionLabel}>Discord</Text>
+      </View>
+      <View style={styles.section}>
+        <View style={[styles.switchRow, { marginBottom: 4 }]}>
+          <Text style={styles.switchLabel}>有効</Text>
+          <Switch
+            value={discordBotEnabled}
+            onValueChange={setDiscordBotEnabled}
+            trackColor={{ false: colors.bgElevated, true: colors.accent }}
+            thumbColor={colors.white}
+          />
+        </View>
+        <Text style={styles.fieldLabel}>Botトークン</Text>
+        <View style={styles.tokenInputRow}>
+          <TextInput
+            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+            value={discordBotToken}
+            onChangeText={setDiscordBotToken}
+            placeholder="Botトークンを入力"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            secureTextEntry={!showBotToken}
+          />
+          <TouchableOpacity
+            style={styles.tokenToggleBtn}
+            onPress={() => setShowBotToken((v) => !v)}
+          >
+            <Ionicons
+              name={showBotToken ? "eye-off-outline" : "eye-outline"}
+              size={18}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.fieldLabel}>チャンネルID</Text>
+        <TextInput
+          style={styles.input}
+          value={discordChannelId}
+          onChangeText={setDiscordChannelId}
+          placeholder="チャンネルIDを入力"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="none"
+          keyboardType="number-pad"
+        />
+        <TouchableOpacity
+          style={[styles.btn, { marginTop: 4 }, !discordSettingsChanged && styles.btnDisabled]}
+          onPress={() => updateDiscordSettingsMutation.mutate()}
+          disabled={!discordSettingsChanged || updateDiscordSettingsMutation.isPending}
+        >
+          {updateDiscordSettingsMutation.isPending ? (
+            <ActivityIndicator color={colors.white} size="small" />
+          ) : (
+            <Text style={[styles.btnText, !discordSettingsChanged && styles.btnTextDisabled]}>保存</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -1005,7 +1118,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   btnGreen: { backgroundColor: colors.successDark, marginTop: 8 },
+  btnDisabled: { backgroundColor: colors.bgElevated },
   btnText: { color: colors.white, fontWeight: "700", fontSize: 14 },
+  btnTextDisabled: { color: colors.textMuted },
   statusOk: { color: colors.success, fontSize: 13, fontWeight: "600" },
   statusErr: { color: colors.error, fontSize: 13, fontWeight: "600" },
 
@@ -1350,6 +1465,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
   },
+  // Discord
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+  switchLabel: {
+    color: colors.textSemi,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  tokenInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  tokenToggleBtn: {
+    padding: 8,
+  },
+  discordDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 12,
+  },
+
   templateHint: { color: colors.textMuted, fontSize: 12, marginBottom: 4 },
   templatePreview: {
     color: colors.textDim,

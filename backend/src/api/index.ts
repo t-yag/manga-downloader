@@ -7,6 +7,7 @@ import { accountRoutes } from "./routes/accounts.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { pluginRoutes } from "./routes/plugins.js";
 import { tagRoutes } from "./routes/tags.js";
+import { ingestRoutes } from "./routes/ingest.js";
 
 export async function createApp() {
   const app = Fastify({
@@ -32,6 +33,7 @@ export async function createApp() {
   await app.register(settingsRoutes);
   await app.register(pluginRoutes);
   await app.register(tagRoutes);
+  await app.register(ingestRoutes);
 
   // Health check
   app.get("/api/health", async () => ({

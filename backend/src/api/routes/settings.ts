@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { db, schema } from "../../db/index.js";
 import { eq } from "drizzle-orm";
+import { restartDiscordBot } from "../../discord/bot.js";
 
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   "download.basePath": "./data/downloads",
@@ -14,6 +15,9 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   "browser.headless": true,
   "browser.executablePath": "",
   "tags.unsetDefault": "hide",
+  "discord.botToken": "",
+  "discord.channelId": "",
+  "discord.botEnabled": false,
 };
 
 /**
@@ -75,6 +79,16 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           },
         })
         .run();
+    }
+
+    // Restart Discord bot if bot-related settings changed
+    const discordBotKeys = ["discord.botToken", "discord.channelId", "discord.botEnabled"];
+    const botSettingsChanged = Object.keys(body).some((key) => discordBotKeys.includes(key));
+    if (botSettingsChanged) {
+      restartDiscordBot().catch((err) => {
+        // Log but don't fail the settings update
+        console.error("Failed to restart Discord bot:", err);
+      });
     }
 
     return { message: "Settings updated" };
