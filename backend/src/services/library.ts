@@ -9,6 +9,12 @@ import { getAllRules, updateDisplayGenres } from "../tags/index.js";
 
 const log = logger.child({ module: "LibraryService" });
 
+export interface QueueDownloadResult {
+  queued: number;
+  jobIds: number[];
+  volumes: number[];
+}
+
 // ─── Account resolution ────────────────────────────────────────────────
 
 /**
@@ -99,7 +105,11 @@ async function forceRelogin(
     log.info(`Re-login successful for account #${account.id}`);
   }
 
-  return plugin.auth.getSession();
+  const session = plugin.auth.getSession();
+  if (!session) {
+    throw new Error("ログイン後のセッション取得に失敗しました");
+  }
+  return session;
 }
 
 /**
