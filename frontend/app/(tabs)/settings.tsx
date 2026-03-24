@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import {
   healthCheck,
   getBaseUrl,
   setBaseUrl,
+  loadBaseUrl,
   type Account,
   type PluginInfo,
   type LoginMethod,
@@ -101,6 +102,7 @@ export default function SettingsScreen() {
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
+    enabled: connected === true,
   });
 
   useEffect(() => {
@@ -130,21 +132,24 @@ export default function SettingsScreen() {
   const { data: accounts = [] } = useQuery({
     queryKey: ["accounts"],
     queryFn: getAccounts,
+    enabled: connected === true,
   });
 
   const { data: plugins = [] } = useQuery({
     queryKey: ["plugins"],
     queryFn: getPlugins,
+    enabled: connected === true,
   });
 
   const { data: capabilities } = useQuery({
     queryKey: ["capabilities"],
     queryFn: getCapabilities,
+    enabled: connected === true,
   });
 
-  const testConnection = async () => {
+  const testConnection = useCallback(async () => {
     setTesting(true);
-    setBaseUrl(apiUrl);
+    await setBaseUrl(apiUrl);
     try {
       await healthCheck();
       setConnected(true);
@@ -154,11 +159,22 @@ export default function SettingsScreen() {
     } finally {
       setTesting(false);
     }
-  };
+  }, [apiUrl, queryClient]);
 
   useEffect(() => {
-    testConnection();
+    loadBaseUrl().then((url) => {
+      setApiUrl(url);
+    });
   }, []);
+
+  // Auto-test connection once apiUrl is loaded
+  const hasTestedRef = useRef(false);
+  useEffect(() => {
+    if (!hasTestedRef.current && apiUrl) {
+      hasTestedRef.current = true;
+      testConnection();
+    }
+  }, [apiUrl, testConnection]);
 
   const updateDownloadSettingsMutation = useMutation({
     mutationFn: () =>

@@ -28,7 +28,7 @@ function NativeTabsLayout() {
             selected: "arrow.down.circle.fill",
           }}
         />
-        <NativeTabs.Trigger.Label>ジョブ</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>DLジョブ</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings" contentStyle={NATIVE_TAB_CONTENT_STYLE}>
         <NativeTabs.Trigger.Icon
@@ -88,7 +88,7 @@ function DefaultTabsLayout() {
       <Tabs.Screen
         name="jobs/index"
         options={{
-          title: "ジョブ",
+          title: "DLジョブ",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="download" size={size} color={color} />
           ),

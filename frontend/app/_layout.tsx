@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Stack, useRouter, usePathname } from "expo-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -6,10 +7,18 @@ import { ToastProvider } from "../src/components/ToastProvider";
 import { Platform, View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../src/theme";
+import { loadBaseUrl } from "../src/api/client";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, staleTime: 10_000 },
+    queries: {
+      retry: (failureCount, error) => {
+        // Don't retry when server is unreachable
+        if (error instanceof Error && error.message.includes("サーバーに接続できません")) return false;
+        return failureCount < 1;
+      },
+      staleTime: 10_000,
+    },
   },
 });
 
@@ -18,7 +27,7 @@ const SIDEBAR_WIDTH = 180;
 const SIDEBAR_ITEMS: { href: string; matchPrefix: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { href: "/", matchPrefix: "/", title: "ライブラリ", icon: "library" },
   { href: "/tags", matchPrefix: "/tags", title: "タグ管理", icon: "pricetag" },
-  { href: "/jobs", matchPrefix: "/jobs", title: "ジョブ", icon: "download" },
+  { href: "/jobs", matchPrefix: "/jobs", title: "DLジョブ", icon: "download" },
   { href: "/settings", matchPrefix: "/settings", title: "設定", icon: "settings" },
 ];
 
@@ -89,6 +98,14 @@ const sidebarStyles = StyleSheet.create({
 const isWeb = Platform.OS === "web";
 
 export default function RootLayout() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    loadBaseUrl().then(() => setReady(true));
+  }, []);
+
+  if (!ready) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

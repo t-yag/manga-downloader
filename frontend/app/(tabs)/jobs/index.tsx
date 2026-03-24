@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, cancelJob, cancelAllJobs, type Job } from "../../../src/api/client";
-import { TAB_CONTENT_PADDING } from "../../../src/constants";
+import { TAB_CONTENT_PADDING, SOURCE_COLORS, DEFAULT_SOURCE_COLOR, PLUGIN_LABELS } from "../../../src/constants";
 import { colors, radius } from "../../../src/theme";
 
 function confirmAction(title: string, message: string, onConfirm: () => void) {
@@ -172,7 +172,9 @@ export default function JobsScreen() {
         <View style={styles.rowBody}>
           <View style={styles.rowMain}>
             <View style={styles.rowTitleRow}>
-              <Text style={styles.dlTag}>DL</Text>
+              <Text style={[styles.pluginTag, { backgroundColor: (SOURCE_COLORS[item.pluginId] ?? DEFAULT_SOURCE_COLOR).bg, color: (SOURCE_COLORS[item.pluginId] ?? DEFAULT_SOURCE_COLOR).text }]}>
+                {PLUGIN_LABELS[item.pluginId] ?? item.pluginId}
+              </Text>
               <Text style={styles.rowTitle} numberOfLines={1}>
                 {label}
               </Text>
@@ -452,13 +454,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  dlTag: {
-    color: colors.accentLight,
+  pluginTag: {
     fontSize: 10,
-    fontWeight: "700",
-    backgroundColor: colors.accentDim,
-    borderRadius: 3,
-    paddingHorizontal: 4,
+    fontWeight: "600",
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 1,
     overflow: "hidden",
   },

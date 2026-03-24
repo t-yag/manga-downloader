@@ -16,7 +16,7 @@ import {
   Dimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, Link } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -492,6 +492,7 @@ export default function LibraryScreen() {
   const {
     data,
     isLoading,
+    isError,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -864,18 +865,38 @@ export default function LibraryScreen() {
             }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <View style={styles.emptyIconWrap}>
-                  <Ionicons name="library-outline" size={48} color={colors.borderAccent} />
-                </View>
-                <Text style={styles.emptyTitle}>
-                  {debouncedSearch || hasFilters
-                    ? "該当するタイトルがありません"
-                    : "ライブラリは空です"}
-                </Text>
-                {!debouncedSearch && !hasFilters && (
-                  <Text style={styles.emptyHint}>
-                    下のURLフィールドから作品を追加して始めましょう
-                  </Text>
+                {isError ? (
+                  <>
+                    <View style={styles.emptyIconWrap}>
+                      <Ionicons name="cloud-offline-outline" size={48} color={colors.borderAccent} />
+                    </View>
+                    <Text style={styles.emptyTitle}>サーバーに接続できません</Text>
+                    <Text style={styles.emptyHint}>
+                      設定画面でサーバーURLを確認してください
+                    </Text>
+                    <Link href="/settings" asChild>
+                      <TouchableOpacity style={styles.emptySettingsBtn}>
+                        <Ionicons name="settings-outline" size={14} color={colors.accentLight} />
+                        <Text style={styles.emptySettingsBtnText}>設定を開く</Text>
+                      </TouchableOpacity>
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.emptyIconWrap}>
+                      <Ionicons name="library-outline" size={48} color={colors.borderAccent} />
+                    </View>
+                    <Text style={styles.emptyTitle}>
+                      {debouncedSearch || hasFilters
+                        ? "該当するタイトルがありません"
+                        : "ライブラリは空です"}
+                    </Text>
+                    {!debouncedSearch && !hasFilters && (
+                      <Text style={styles.emptyHint}>
+                        下のURLフィールドから作品を追加して始めましょう
+                      </Text>
+                    )}
+                  </>
                 )}
               </View>
             }
@@ -1325,5 +1346,22 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingHorizontal: 40,
     lineHeight: 20,
+  },
+  emptySettingsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 16,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.sm,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  emptySettingsBtnText: {
+    color: colors.accentLight,
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
