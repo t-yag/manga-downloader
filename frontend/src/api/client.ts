@@ -1,9 +1,30 @@
 import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-let BASE_URL = Platform.OS === "web" ? "http://localhost:3000" : "http://localhost:3000";
+const STORAGE_KEY = "manga-downloader:serverUrl";
+const DEFAULT_URL = "http://localhost:3000";
 
-export function setBaseUrl(url: string) {
+let BASE_URL = DEFAULT_URL;
+
+export async function loadBaseUrl(): Promise<string> {
+  try {
+    const saved = await AsyncStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      BASE_URL = saved;
+    }
+  } catch (e) {
+    console.warn("Failed to load base URL from storage", e);
+  }
+  return BASE_URL;
+}
+
+export async function setBaseUrl(url: string) {
   BASE_URL = url.replace(/\/+$/, "");
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, BASE_URL);
+  } catch (e) {
+    console.warn("Failed to save base URL to storage", e);
+  }
 }
 
 export function getBaseUrl() {
@@ -15,17 +36,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (options?.body) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
 
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new Error("サーバーに接続できません");
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${res.status}`);
   }
-
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 // --- URL Parse ---

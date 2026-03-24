@@ -7,7 +7,7 @@ export const PLUGIN_LABELS: Record<string, string> = {
   kindle: "Kindle",
 };
 
-/** @deprecated Use SOURCE_LABELS instead */
+/** @deprecated Use PLUGIN_LABELS instead */
 export const SOURCE_LABELS = PLUGIN_LABELS;
 
 export const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
