@@ -15,7 +15,14 @@ export async function createApp() {
     loggerInstance: logger,
   });
 
+  const silentRoutes = new Set(["/api/jobs"]);
+
   app.addHook("onResponse", (request, reply, done) => {
+    const pathname = request.url.split("?")[0];
+    if (reply.statusCode < 400 && silentRoutes.has(pathname)) {
+      done();
+      return;
+    }
     const ms = reply.elapsedTime.toFixed(0);
     app.log.info(`${request.method} ${request.url} ${reply.statusCode} ${ms}ms`);
     done();
