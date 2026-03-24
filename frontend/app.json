@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "manga-downloader",
-    "slug": "manga-downloader",
+    "name": "Manga DL",
+    "slug": "manga-dl",
     "scheme": "manga-downloader",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "backgroundColor": "#0f172a"
+      "backgroundColor": "#0f172a",
+      "bundleIdentifier": "com.overpatch.mangadl",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -30,6 +34,13 @@
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "dec0a0f0-a792-4f7b-833d-0ab274e68b4b"
+      }
+    },
+    "owner": "overpatch"
   }
 }
