@@ -105,6 +105,14 @@ function getExternalUrl(pluginId: string, titleId: string): string | null {
       return `https://piccoma.com/web/product/${titleId}`;
     case "kindle":
       return `https://www.amazon.co.jp/dp/${titleId}`;
+    case "dmmbooks": {
+      const sep = titleId.indexOf(":");
+      const seriesId = sep >= 0 ? titleId.slice(0, sep) : titleId;
+      const contentId = sep >= 0 ? titleId.slice(sep + 1) : "";
+      return contentId
+        ? `https://book.dmm.com/product/${seriesId}/${contentId}/`
+        : `https://book.dmm.com/product/${seriesId}/`;
+    }
     default:
       return null;
   }

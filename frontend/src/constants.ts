@@ -5,6 +5,7 @@ export const PLUGIN_LABELS: Record<string, string> = {
   nhentai: "nHentai",
   piccoma: "ピッコマ",
   kindle: "Kindle",
+  dmmbooks: "DMMブックス",
 };
 
 /** @deprecated Use PLUGIN_LABELS instead */
@@ -17,6 +18,7 @@ export const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
   booklive: { bg: "#3b1e0e", text: "#EC662B" },
   nhentai: { bg: "#3b1219", text: "#D93E57" },
   kindle: { bg: "#1a2a42", text: "#568DD8" },
+  dmmbooks: { bg: "#d0d0d0", text: "#111111" },
 };
 
 export const DEFAULT_SOURCE_COLOR = { bg: "#334155", text: "#94a3b8" };

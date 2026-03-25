@@ -13,6 +13,7 @@ import { createMomongaPlugin } from "./plugins/momonga/index.js";
 import { createNhentaiPlugin } from "./plugins/nhentai/index.js";
 import { createPiccomaPlugin } from "./plugins/piccoma/index.js";
 import { createKindlePlugin } from "./plugins/kindle/index.js";
+import { createDmmBooksPlugin } from "./plugins/dmmbooks/index.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -30,6 +31,7 @@ async function main() {
   registry.register(createNhentaiPlugin());
   registry.register(createPiccomaPlugin());
   registry.register(createKindlePlugin());
+  registry.register(createDmmBooksPlugin());
   logger.info(`Registered ${registry.getAll().length} plugin(s)`);
 
   // Start API server
