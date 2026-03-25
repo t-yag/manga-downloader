@@ -1,5 +1,3 @@
-import { Browser, Page } from "puppeteer";
-import axios from "axios";
 import fs from "fs/promises";
 import { logger } from "../../logger.js";
 import { launchBrowser } from "../browser.js";
@@ -7,30 +5,36 @@ import type {
   AuthProvider,
   CredentialField,
   SessionData,
-  CookieData,
 } from "../base.js";
 
 const log = logger.child({ module: "CmoaAuth" });
 
+const CMOA_LOGIN_URL = "https://www.cmoa.jp/auth/login/";
+
+/** Timeout for manual login (5 minutes) */
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+
 /**
  * Cmoa authentication provider
- * Handles Puppeteer-based login, cookie persistence, and session validation
+ * Supports three login methods:
+ *   1. credentials — auto-fill email/password via headless Puppeteer
+ *   2. browser    — open cmoa.jp in non-headless browser for manual login
+ *   3. cookie_import — import cookies via API
  */
 export class CmoaAuth implements AuthProvider {
-  private browser: Browser | null = null;
   private session: SessionData | null = null;
 
   getCredentialFields(): CredentialField[] {
     return [
       {
         key: "email",
-        label: "Email",
+        label: "メールアドレス",
         type: "email",
         required: true,
       },
       {
         key: "password",
-        label: "Password",
+        label: "パスワード",
         type: "password",
         required: true,
       },
@@ -39,55 +43,96 @@ export class CmoaAuth implements AuthProvider {
 
   async login(credentials: Record<string, string>): Promise<boolean> {
     const { email, password } = credentials;
+    const hasCredentials = email && password;
 
-    if (!email || !password) {
-      throw new Error("Email and password are required");
-    }
+    log.info(
+      hasCredentials
+        ? "Logging in with credentials..."
+        : "Opening browser for manual login...",
+    );
 
-    log.info("Logging in with browser...");
-
-    this.browser = await launchBrowser();
-    const page = await this.browser.newPage();
-    page.setDefaultTimeout(60000);
-    page.setDefaultNavigationTimeout(60000);
+    const browser = await launchBrowser({ headless: hasCredentials ? true : false });
+    const page = await browser.newPage();
+    page.setDefaultTimeout(LOGIN_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(LOGIN_TIMEOUT_MS);
 
     try {
       // Navigate to login page
-      await page.goto("https://www.cmoa.jp/auth/login/", {
+      await page.goto(CMOA_LOGIN_URL, {
         waitUntil: "networkidle2",
         timeout: 60000,
       });
 
-      // Wait for input fields
-      await page.waitForSelector('input[name="email"]', { timeout: 30000 });
+      if (hasCredentials) {
+        // Wait for input fields
+        await page.waitForSelector('input[name="email"]', { timeout: 30000 });
 
-      // Enter credentials
-      await page.type('input[name="email"]', email, { delay: 100 });
-      await page.type('input[name="password"]', password, { delay: 100 });
+        // Enter credentials
+        await page.type('input[name="email"]', email, { delay: 100 });
+        await page.type('input[name="password"]', password, { delay: 100 });
 
-      // Submit form directly (the #submitButton triggers an async API call
-      // that doesn't navigate; form.submit() goes through the OpenID POST flow)
-      const [response] = await Promise.all([
-        page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
-        page.evaluate(() => {
-          const form = document.querySelector("form") as HTMLFormElement;
-          if (!form) throw new Error("Login form not found");
-          form.submit();
-        }),
-      ]);
-
-      // Get cookies
-      const cookies = await page.cookies();
-      const finalUrl = page.url();
-
-      // Verify login success
-      if (!finalUrl.includes("www.cmoa.jp") || finalUrl.includes("/auth/login")) {
-        throw new Error("Login failed: not redirected to correct page");
+        // Submit form directly (the #submitButton triggers an async API call
+        // that doesn't navigate; form.submit() goes through the OpenID POST flow)
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+          page.evaluate(() => {
+            const form = document.querySelector("form") as HTMLFormElement;
+            if (!form) throw new Error("Login form not found");
+            form.submit();
+          }),
+        ]);
       }
 
-      // Convert Puppeteer cookies to SessionData format
+      // Wait for auth cookies (manual login or after auto-fill)
+      log.info("Waiting for login to complete...");
+
+      const cdpClient = await page.createCDPSession();
+      const hasAuthCookies = async (): Promise<boolean> => {
+        const { cookies } = await cdpClient.send("Network.getAllCookies");
+        return cookies.some(
+          (c: any) =>
+            (c.name === "_ssid_" || c.name === "_cmoa_login_session_token_") &&
+            c.domain.includes("cmoa.jp"),
+        );
+      };
+
+      const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (await hasAuthCookies()) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      const loggedIn = await hasAuthCookies();
+      await cdpClient.detach();
+
+      if (!loggedIn) {
+        throw new Error("Login timed out: auth cookies not detected");
+      }
+
+      log.info(`Login detected via auth cookies, current URL: ${page.url()}`);
+
+      // Wait for page to settle
+      await page.waitForNetworkIdle({ idleTime: 2000, timeout: 30000 }).catch(() => {
+        log.warn("Network idle timeout, proceeding with cookie capture...");
+      });
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Use CDP to get ALL cookies across all domains
+      const client = await page.createCDPSession();
+      const { cookies } = await client.send("Network.getAllCookies");
+      await client.detach();
+
+      // Keep only .cmoa.jp cookies
+      const cmoaCookies = cookies.filter(
+        (c: any) => c.domain.includes("cmoa.jp"),
+      );
+
+      if (cmoaCookies.length === 0) {
+        throw new Error("No cmoa cookies captured after login");
+      }
+
       this.session = {
-        cookies: cookies.map((c) => ({
+        cookies: cmoaCookies.map((c: any) => ({
           name: c.name,
           value: c.value,
           domain: c.domain,
@@ -96,24 +141,13 @@ export class CmoaAuth implements AuthProvider {
         })),
       };
 
-      log.info(`Login successful (${cookies.length} cookies)`);
-
+      log.info(`Login successful (${cmoaCookies.length} cookies captured)`);
       return true;
     } catch (error: any) {
       log.error(`Login failed: ${error.message}`);
       return false;
     } finally {
-      if (page) {
-        try {
-          await page.close();
-        } catch (e) {
-          // Ignore page close errors
-        }
-      }
-      if (this.browser) {
-        await this.browser.close();
-        this.browser = null;
-      }
+      await browser.close();
     }
   }
 

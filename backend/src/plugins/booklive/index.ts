@@ -253,8 +253,10 @@ export function createBookLivePlugin(): Plugin {
       name: "BookLive",
       version: "1.0.0",
       contentType: "series",
-      loginMethods: ["credentials"],
-      authCookieNames: ["BL_MEM", "PHPSESSID"],
+      loginMethods: ["credentials", "browser", "cookie_import"],
+      authCookieNames: ["PHPSESSID"],
+      authUrl: "https://booklive.jp/login",
+      authDomain: ".booklive.jp",
       supportedFeatures: {
         search: false,
         metadata: true,

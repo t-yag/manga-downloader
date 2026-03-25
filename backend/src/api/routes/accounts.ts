@@ -150,6 +150,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   // Login account (execute browser login and save cookies)
   app.post("/api/accounts/:id/login", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { method } = (request.body as { method?: string } | null) ?? {};
 
     const account = db
       .select()
@@ -165,7 +166,8 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const credentials = JSON.parse(account.credentials);
+      // When method is "browser", pass empty credentials to trigger non-headless browser
+      const credentials = method === "browser" ? {} : JSON.parse(account.credentials);
       const success = await plugin.auth.login(credentials);
 
       if (!success) {

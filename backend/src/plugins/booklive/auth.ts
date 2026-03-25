@@ -1,9 +1,11 @@
 /**
  * BookLive authentication provider.
- * Uses Puppeteer-based login with visible browser (reCAPTCHA requires non-headless).
+ * Supports three login methods:
+ *   1. credentials — auto-fill email/password via Puppeteer (reCAPTCHA may require manual solve)
+ *   2. browser    — open booklive.jp in non-headless browser for manual login
+ *   3. cookie_import — import cookies via API
  */
 
-import { Browser } from "puppeteer";
 import fs from "fs/promises";
 import { logger } from "../../logger.js";
 import { launchBrowser } from "../browser.js";
@@ -11,26 +13,29 @@ import type {
   AuthProvider,
   CredentialField,
   SessionData,
-  CookieData,
 } from "../base.js";
 
 const log = logger.child({ module: "BookLiveAuth" });
 
+const BOOKLIVE_LOGIN_URL = "https://booklive.jp/login";
+
+/** Timeout for manual login (5 minutes) */
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class BookLiveAuth implements AuthProvider {
-  private browser: Browser | null = null;
   private session: SessionData | null = null;
 
   getCredentialFields(): CredentialField[] {
     return [
       {
         key: "email",
-        label: "Email",
+        label: "メールアドレス",
         type: "email",
         required: true,
       },
       {
         key: "password",
-        label: "Password",
+        label: "パスワード",
         type: "password",
         required: true,
       },
@@ -39,90 +44,111 @@ export class BookLiveAuth implements AuthProvider {
 
   async login(credentials: Record<string, string>): Promise<boolean> {
     const { email, password } = credentials;
+    const hasCredentials = email && password;
 
-    if (!email || !password) {
-      throw new Error("Email and password are required");
-    }
+    log.info(
+      hasCredentials
+        ? "Logging in with credentials..."
+        : "Opening browser for manual login...",
+    );
 
-    log.info("Logging in with browser...");
-
-    this.browser = await launchBrowser();
-    const page = await this.browser.newPage();
-    page.setDefaultTimeout(60000);
-    page.setDefaultNavigationTimeout(60000);
+    const browser = await launchBrowser({ headless: hasCredentials ? true : false });
+    const page = await browser.newPage();
+    page.setDefaultTimeout(LOGIN_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(LOGIN_TIMEOUT_MS);
 
     try {
       // Navigate to login page
-      await page.goto("https://booklive.jp/login", {
+      await page.goto(BOOKLIVE_LOGIN_URL, {
         waitUntil: "networkidle2",
         timeout: 60000,
       });
 
-      // Wait for login form
-      await page.waitForSelector('input[name="mail_addr"]', { timeout: 30000 });
+      if (hasCredentials) {
+        // Wait for login form
+        await page.waitForSelector('input[name="mail_addr"]', { timeout: 30000 });
 
-      // Enter credentials
-      await page.type('input[name="mail_addr"]', email, { delay: 80 });
-      await page.type('input[name="pswd"]', password, { delay: 80 });
+        // Enter credentials
+        await page.type('input[name="mail_addr"]', email, { delay: 80 });
+        await page.type('input[name="pswd"]', password, { delay: 80 });
 
-      // Click login button
-      const submitButton = await page.$("#login_button_1");
-      if (!submitButton) {
-        throw new Error("Login button not found");
-      }
-
-      await submitButton.click();
-
-      try {
-        await page.waitForNavigation({
-          waitUntil: "networkidle2",
-          timeout: 15000,
-        });
-      } catch {
-        // Navigation timeout can be ignored
-      }
-
-      // Handle reCAPTCHA if triggered
-      if (page.url().includes("/login/recaptcha")) {
-        log.info("reCAPTCHA detected - waiting for manual solution (up to 120s)...");
-        await page.waitForFunction(
-          () => !window.location.href.includes("/login/recaptcha"),
-          { timeout: 120000 }
-        );
-        log.info("reCAPTCHA solved");
-      }
-
-      // Wait for redirect to complete (max 15 seconds)
-      const maxWaitTime = 15000;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < maxWaitTime) {
-        const currentUrl = page.url();
-
-        // Success: redirected away from login page
-        if (
-          currentUrl.includes("booklive.jp") &&
-          !currentUrl.includes("/login")
-        ) {
-          break;
+        // Click login button
+        const submitButton = await page.$("#login_button_1");
+        if (!submitButton) {
+          throw new Error("Login button not found");
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await submitButton.click();
+
+        try {
+          await page.waitForNavigation({
+            waitUntil: "networkidle2",
+            timeout: 15000,
+          });
+        } catch {
+          // Navigation timeout can be ignored
+        }
+
+        // Handle reCAPTCHA if triggered
+        if (page.url().includes("/login/recaptcha")) {
+          log.info("reCAPTCHA detected - waiting for manual solution (up to 120s)...");
+          await page.waitForFunction(
+            () => !window.location.href.includes("/login/recaptcha"),
+            { timeout: 120000 }
+          );
+          log.info("reCAPTCHA solved");
+        }
       }
 
-      // Get cookies
-      const cookies = await page.cookies();
-      const finalUrl = page.url();
+      // Wait for auth cookies (manual login or after auto-fill)
+      log.info("Waiting for login to complete...");
 
-      // Verify login success by checking for BL_MEM cookie (member flag)
-      const memberCookie = cookies.find((c) => c.name === "BL_MEM");
-      if (!memberCookie || finalUrl.includes("/login")) {
-        throw new Error("Login failed: BL_MEM cookie not found or still on login page");
+      const cdpClient = await page.createCDPSession();
+      const hasAuthCookies = async (): Promise<boolean> => {
+        const { cookies } = await cdpClient.send("Network.getAllCookies");
+        return cookies.some(
+          (c: any) =>
+            c.name === "BL_MEM" && c.domain.includes("booklive.jp"),
+        );
+      };
+
+      const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (await hasAuthCookies()) break;
+        await new Promise((r) => setTimeout(r, 2000));
       }
 
-      // Convert Puppeteer cookies to SessionData format
+      const loggedIn = await hasAuthCookies();
+      await cdpClient.detach();
+
+      if (!loggedIn) {
+        throw new Error("Login timed out: auth cookies not detected");
+      }
+
+      log.info(`Login detected via auth cookies, current URL: ${page.url()}`);
+
+      // Wait for page to settle
+      await page.waitForNetworkIdle({ idleTime: 2000, timeout: 30000 }).catch(() => {
+        log.warn("Network idle timeout, proceeding with cookie capture...");
+      });
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Use CDP to get ALL cookies across all domains
+      const client = await page.createCDPSession();
+      const { cookies } = await client.send("Network.getAllCookies");
+      await client.detach();
+
+      // Keep only .booklive.jp cookies
+      const blCookies = cookies.filter(
+        (c: any) => c.domain.includes("booklive.jp"),
+      );
+
+      if (blCookies.length === 0) {
+        throw new Error("No BookLive cookies captured after login");
+      }
+
       this.session = {
-        cookies: cookies.map((c) => ({
+        cookies: blCookies.map((c: any) => ({
           name: c.name,
           value: c.value,
           domain: c.domain,
@@ -131,24 +157,13 @@ export class BookLiveAuth implements AuthProvider {
         })),
       };
 
-      log.info(`Login successful (${cookies.length} cookies)`);
-
+      log.info(`Login successful (${blCookies.length} cookies captured)`);
       return true;
     } catch (error: any) {
       log.error(`Login failed: ${error.message}`);
       return false;
     } finally {
-      if (page) {
-        try {
-          await page.close();
-        } catch {
-          // Ignore page close errors
-        }
-      }
-      if (this.browser) {
-        await this.browser.close();
-        this.browser = null;
-      }
+      await browser.close();
     }
   }
 
@@ -160,20 +175,16 @@ export class BookLiveAuth implements AuthProvider {
 
     log.info("Validating session...");
 
-    // Check for essential auth cookies
-    const requiredCookies = ["PHPSESSID", "BL_MEM"];
-    for (const name of requiredCookies) {
-      const cookie = this.session.cookies.find((c) => c.name === name);
-      if (!cookie) {
-        log.warn(`Session invalid: ${name} cookie not found`);
-        return false;
-      }
+    // Check for essential auth cookie
+    const sessionCookie = this.session.cookies.find((c) => c.name === "PHPSESSID");
+    if (!sessionCookie) {
+      log.warn("Session invalid: PHPSESSID cookie not found");
+      return false;
     }
 
     // Check cookie expiry
     const now = Date.now() / 1000;
-    const sessionCookie = this.session.cookies.find((c) => c.name === "PHPSESSID");
-    if (sessionCookie?.expires && sessionCookie.expires > 0 && sessionCookie.expires < now) {
+    if (sessionCookie.expires && sessionCookie.expires > 0 && sessionCookie.expires < now) {
       log.warn("Session invalid: PHPSESSID cookie expired");
       return false;
     }
