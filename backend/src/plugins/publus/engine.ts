@@ -326,8 +326,7 @@ export class PubLusEngine {
       }
 
       if (!buffer || buffer.length === 0) {
-        log.warn(`No image data for page ${i + 1} (${pageInfo.file}), skipping`);
-        continue;
+        throw new Error(`Failed to fetch page ${i + 1} (${pageInfo.file}) after all retries`);
       }
 
       // Descramble
@@ -406,7 +405,7 @@ export class PubLusEngine {
   /**
    * Fetch a page image directly from CDN using browser cookies.
    */
-  private async fetchPageImage(pageInfo: PageInfo, pageIndex: number, maxRetries = 3): Promise<Buffer | null> {
+  private async fetchPageImage(pageInfo: PageInfo, pageIndex: number, maxRetries = 5): Promise<Buffer | null> {
     if (!this.contentBaseUrl) return null;
 
     const imageUrl = `${this.contentBaseUrl}OPS/images/${pageInfo.file}/0.jpeg`;
