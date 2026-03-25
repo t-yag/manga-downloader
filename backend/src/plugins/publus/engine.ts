@@ -190,7 +190,9 @@ export class PubLusEngine {
         value: cookie.value,
         domain: cookie.domain,
         path: cookie.path || '/',
-        expires: cookie.expires,
+        ...(typeof cookie.expires === 'number' && cookie.expires > 0
+          ? { expires: cookie.expires }
+          : {}),
       }));
       await this.page.setCookie(...puppeteerCookies);
       log.info(`Cookies set: ${cookies.length}`);

@@ -368,7 +368,9 @@ class PiccomaDownloader implements Downloader {
             value: c.value,
             domain: c.domain,
             path: c.path || "/",
-            expires: c.expires,
+            ...(typeof c.expires === "number" && c.expires > 0
+              ? { expires: c.expires }
+              : {}),
           })),
         );
       }

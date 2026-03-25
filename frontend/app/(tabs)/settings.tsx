@@ -355,6 +355,17 @@ export default function SettingsScreen() {
     },
   });
 
+  const browserLoginMutation = useMutation({
+    mutationFn: (accountId: number) => loginAccount(accountId, "browser"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      toast.success("ログインしました。");
+    },
+    onError: (err: Error) => {
+      toast.error("ログイン失敗", { description: err.message });
+    },
+  });
+
   const clearSessionMutation = useMutation({
     mutationFn: (accountId: number) => clearAccountSession(accountId),
     onSuccess: () => {
@@ -880,15 +891,15 @@ export default function SettingsScreen() {
                                   style={[styles.btn, styles.btnGreen, { flex: 1 }]}
                                   onPress={() => {
                                     if (pluginAccount) {
-                                      loginMutation.mutate(pluginAccount.id);
+                                      browserLoginMutation.mutate(pluginAccount.id);
                                       setExpandedPluginId(null);
                                     } else {
                                       addAccountMutation.mutate({ pluginId: p.id, method: "browser" });
                                     }
                                   }}
-                                  disabled={addAccountMutation.isPending || loginMutation.isPending}
+                                  disabled={addAccountMutation.isPending || browserLoginMutation.isPending}
                                 >
-                                  {addAccountMutation.isPending || loginMutation.isPending ? (
+                                  {addAccountMutation.isPending || browserLoginMutation.isPending ? (
                                     <ActivityIndicator color={colors.white} size="small" />
                                   ) : (
                                     <Text style={styles.btnText}>ブラウザを開く</Text>

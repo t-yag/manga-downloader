@@ -318,9 +318,10 @@ export function deleteAccount(id: number) {
   return request<{ message: string }>(`/api/accounts/${id}`, { method: "DELETE" });
 }
 
-export function loginAccount(id: number) {
+export function loginAccount(id: number, loginMethod?: LoginMethod) {
   return request<{ success: boolean; message: string }>(`/api/accounts/${id}/login`, {
     method: "POST",
+    body: JSON.stringify(loginMethod ? { method: loginMethod } : {}),
   });
 }
 
