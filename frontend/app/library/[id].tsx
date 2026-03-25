@@ -656,26 +656,6 @@ export default function TitleDetailScreen() {
 
         {/* Series controls (fixed, not scrollable) */}
         {!isStandalone && (<>
-        {/* Series: Error retry banner */}
-        {counts.other > 0 && volumes.some((v) => v.status === "error") && (
-          <TouchableOpacity
-            style={[styles.retryBanner, { marginHorizontal: 16 }]}
-            onPress={() => downloadMutation.mutate({ vols: "error", unit: hasBothUnits ? activeUnit : undefined })}
-            disabled={downloadMutation.isPending}
-          >
-            {downloadMutation.isPending ? (
-              <ActivityIndicator color={colors.error} size="small" />
-            ) : (
-              <>
-                <Ionicons name="refresh" size={14} color={colors.error} />
-                <Text style={styles.retryBannerText}>
-                  エラー {volumes.filter((v) => v.status === "error").length}{activeUnit === "ep" ? "話" : "巻"}を再試行
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-
         {/* Series: Unit tabs (話読み / 巻読み) */}
         {hasBothUnits && (
           <View style={styles.contentPadding}>
@@ -1347,24 +1327,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   selBarBtnText: { color: colors.accentLight, fontSize: 13, fontWeight: "600" },
-
-  // Retry banner
-  retryBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: colors.errorBg,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  retryBannerText: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: "600",
-  },
 
   // Standalone layout
   saTagRow: {

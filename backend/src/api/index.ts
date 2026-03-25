@@ -15,11 +15,11 @@ export async function createApp() {
     loggerInstance: logger,
   });
 
-  const silentRoutes = new Set(["/api/jobs"]);
+  const silentRoutes = ["/api/jobs", "/api/library/"];
 
   app.addHook("onResponse", (request, reply, done) => {
     const pathname = request.url.split("?")[0];
-    if (reply.statusCode < 400 && silentRoutes.has(pathname)) {
+    if (reply.statusCode < 400 && silentRoutes.some((r) => pathname === r || pathname.startsWith(r))) {
       done();
       return;
     }
