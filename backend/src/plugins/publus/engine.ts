@@ -208,10 +208,9 @@ export class PubLusEngine {
             const filename = url.split('/OPS/images/')[1].replace('/0.jpeg', '');
             this.imageBuffers.set(filename, buffer);
           }
-        } catch (e: any) {
-          if (!e.message?.includes('Could not load response body')) {
-            log.error(`Failed to capture image: ${e.message}`);
-          }
+        } catch {
+          // Response body may be unavailable (e.g. target closed, body undefined);
+          // images are fetched directly via CDN as primary method, so this is harmless.
         }
       }
 
@@ -407,40 +406,53 @@ export class PubLusEngine {
   /**
    * Fetch a page image directly from CDN using browser cookies.
    */
-  private async fetchPageImage(pageInfo: PageInfo, pageIndex: number): Promise<Buffer | null> {
+  private async fetchPageImage(pageInfo: PageInfo, pageIndex: number, maxRetries = 3): Promise<Buffer | null> {
     if (!this.contentBaseUrl) return null;
 
     const imageUrl = `${this.contentBaseUrl}OPS/images/${pageInfo.file}/0.jpeg`;
-    try {
-      const cookieString = await this.getCdnCookieString();
-      const resp = await fetch(imageUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          'Cookie': cookieString,
-          'Referer': 'https://book.dmm.com/',
-        },
-        signal: AbortSignal.timeout(30000),
-      });
+    const cookieString = await this.getCdnCookieString();
 
-      if (!resp.ok) {
-        log.warn(`HTTP ${resp.status} for page ${pageIndex + 1}: ${imageUrl}`);
-        return null;
-      }
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const resp = await fetch(imageUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            'Cookie': cookieString,
+            'Referer': 'https://book.dmm.com/',
+          },
+          signal: AbortSignal.timeout(30000),
+        });
 
-      const arrayBuffer = await resp.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      if (buffer.length === 0) {
-        log.warn(`Empty response for page ${pageIndex + 1}`);
-        return null;
+        if (!resp.ok) {
+          if (resp.status >= 500 && attempt < maxRetries - 1) {
+            log.warn(`HTTP ${resp.status} for page ${pageIndex + 1} (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+            continue;
+          }
+          log.warn(`HTTP ${resp.status} for page ${pageIndex + 1}: ${imageUrl}`);
+          return null;
+        }
+
+        const arrayBuffer = await resp.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        if (buffer.length === 0) {
+          log.warn(`Empty response for page ${pageIndex + 1}`);
+          return null;
+        }
+        // Verify it's actually a JPEG (starts with FF D8)
+        if (buffer[0] !== 0xFF || buffer[1] !== 0xD8) {
+          log.warn(`Page ${pageIndex + 1}: not a JPEG (got ${buffer.length} bytes, starts with ${buffer.slice(0, 4).toString('hex')})`);
+          return null;
+        }
+        return buffer;
+      } catch (e: any) {
+        if (attempt < maxRetries - 1) {
+          log.warn(`Fetch page ${pageIndex + 1} failed (attempt ${attempt + 1}/${maxRetries}): ${e.message}`);
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        } else {
+          log.error(`Failed to fetch page ${pageIndex + 1} after ${maxRetries} attempts: ${e.message}`);
+        }
       }
-      // Verify it's actually a JPEG (starts with FF D8)
-      if (buffer[0] !== 0xFF || buffer[1] !== 0xD8) {
-        log.warn(`Page ${pageIndex + 1}: not a JPEG (got ${buffer.length} bytes, starts with ${buffer.slice(0, 4).toString('hex')})`);
-        return null;
-      }
-      return buffer;
-    } catch (e: any) {
-      log.error(`Failed to fetch page ${pageIndex + 1}: ${e.message}`);
     }
     return null;
   }

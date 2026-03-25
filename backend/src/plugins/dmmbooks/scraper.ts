@@ -55,7 +55,11 @@ interface BffContentsBookItem {
   content_publish_date: string | null;
   limited_free: { end: string | null } | null;
   sell: { product_id: string } | null;
-  purchased: unknown;
+  purchased: {
+    streaming_url: string;
+    download_url: string;
+    purchased_date: string;
+  } | null;
 }
 
 interface BffContentsBook {
@@ -118,6 +122,7 @@ export class DmmBooksScraper implements MetadataProvider {
     const volumes: VolumeInfo[] = allBooks.map((book) => {
       const freeUrls = book.free_streaming_url ?? [];
       const readerUrl =
+        book.purchased?.streaming_url ??
         freeUrls[0] ??
         `https://book.dmm.com/product/${seriesId}/${book.content_id}/`;
 
@@ -174,6 +179,7 @@ export class DmmBooksScraper implements MetadataProvider {
 
     const freeUrls = book.free_streaming_url ?? [];
     const readerUrl =
+      book.purchased?.streaming_url ??
       freeUrls[0] ??
       `https://book.dmm.com/product/${seriesId}/${book.content_id}/`;
 
