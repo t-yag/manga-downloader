@@ -557,7 +557,7 @@ export default function LibraryScreen() {
       addMutation.mutate(url.trim());
     },
     onError: (err: Error) =>
-      toast.error("URL解析に失敗しました", { description: err.message }),
+      toast.error("作品の確認に失敗しました", { description: err.message }),
   });
 
   const handleAdd = async () => {

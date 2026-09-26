@@ -12,7 +12,7 @@ const log = logger.child({ module: "KindleAuth" });
 const AMAZON_LOGIN_URL =
   "https://www.amazon.co.jp/ap/signin?openid.pape.max_auth_age=1209600&openid.return_to=https%3A%2F%2Fread.amazon.co.jp%2Fkindle-library&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=amzn_kindle_mykindle_jp&openid.mode=checkid_setup&language=ja_JP&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&pageId=amzn_kindle_mykindle_jp&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0";
 
-const KINDLE_LIBRARY_URL = "https://read.amazon.co.jp/kindle-library";
+const KINDLE_LIBRARY_URL = "https://www.amazon.co.jp/your-books";
 
 /** Timeout for manual login (5 minutes) */
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -47,19 +47,18 @@ export class KindleAuth implements AuthProvider {
       log.info("Waiting for user to complete Amazon login...");
 
       // Poll until we have actual auth cookies (not just a URL redirect)
-      // Amazon login flow: /ap/signin → (CAPTCHA/MFA/etc) → redirect → read.amazon.co.jp
-      // But even without login, the URL can end up on read.amazon.co.jp (with a login prompt there)
+      // A redirect alone is insufficient: wait for all cookies required by
+      // validateSession, including the Japan-specific authentication cookies.
       log.info("Waiting for user to complete Amazon login (checking for auth cookies)...");
 
       const hasAuthCookies = async (): Promise<boolean> => {
         const client = await page.createCDPSession();
         const { cookies } = await client.send("Network.getAllCookies");
         await client.detach();
-        return cookies.some(
-          (c: any) =>
-            (c.name === "session-token" || c.name === "x-main" || c.name === "at-main") &&
-            c.domain.includes("amazon.co.jp"),
-        );
+        return this.authCookieNames.every((name) => cookies.some(
+          (c) => c.name === name &&
+            (c.domain === "amazon.co.jp" || c.domain.endsWith(".amazon.co.jp")),
+        ));
       };
 
       // Wait up to LOGIN_TIMEOUT_MS, checking cookies every 2 seconds
@@ -73,10 +72,10 @@ export class KindleAuth implements AuthProvider {
         throw new Error("Login timed out: auth cookies not detected");
       }
 
-      log.info(`Login detected via auth cookies, current URL: ${page.url()}`);
+      log.info("Login detected via auth cookies");
 
-      // Navigate to Kindle Library to ensure all cookies are captured
-      if (!page.url().includes("read.amazon.co.jp")) {
+      // Open the current Your Books page to finish capturing the session
+      if (new URL(page.url()).pathname !== "/your-books") {
         await page.goto(KINDLE_LIBRARY_URL, {
           waitUntil: "domcontentloaded",
           timeout: 30000,
