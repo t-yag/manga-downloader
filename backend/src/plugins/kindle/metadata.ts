@@ -94,6 +94,22 @@ function buildCookieString(cookies: CookieData[]): string {
   return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
+// These responses must never be treated as a book or hidden by a fallback.
+class KindleAccessError extends Error {}
+
+function checkAmazonPage(html: string, responseUrl: string): void {
+  const $ = cheerio.load(html);
+  const pathname = responseUrl ? new URL(responseUrl).pathname : "";
+  if ($('input#captchacharacters, form[action*="validateCaptcha"]').length ||
+      /captcha|validateCaptcha/i.test(pathname)) {
+    throw new KindleAccessError("Amazonの確認画面（CAPTCHA）が表示されています。ブラウザで確認を完了してから再試行してください");
+  }
+  if ($('input#ap_email, input#ap_email_login, form[name="signIn"]').length ||
+      /^\/(?:ap\/signin|ax\/claim|landing)(?:\/|$)/.test(pathname)) {
+    throw new KindleAccessError("Kindleセッションが無効です。アカウント設定から再ログインしてください");
+  }
+}
+
 async function fetchLibraryItems(cookies: CookieData[]): Promise<KindleItem[]> {
   const cookieString = buildCookieString(cookies);
 
@@ -113,21 +129,16 @@ async function fetchLibraryItems(cookies: CookieData[]): Promise<KindleItem[]> {
 
   const html = await response.text();
 
-  // Check if we got redirected to login (detect actual sign-in form, not navigation links)
-  if (html.includes('id="ap_email"') || html.includes('name="signIn"')) {
-    throw new Error("Kindleセッションが無効です。再ログインしてください");
-  }
+  checkAmazonPage(html, response.url);
 
-  // Extract itemsList from the itemViewResponse script tag
-  const scriptMatch = html.match(
-    /<script\s+id="itemViewResponse"\s+type="application\/json">([\s\S]*?)<\/script>/,
-  );
-  if (!scriptMatch) {
-    throw new Error("Kindle Library: itemViewResponse script tag not found in HTML");
+  // Attribute order may vary. The new /your-books page no longer embeds this data.
+  const script = cheerio.load(html)('script#itemViewResponse').text();
+  if (!script) {
+    throw new Error("Kindleライブラリの補助情報を取得できません（本棚の形式が変更されています）");
   }
 
   try {
-    const data = JSON.parse(scriptMatch[1]);
+    const data = JSON.parse(script);
     if (!data.itemsList || !Array.isArray(data.itemsList)) {
       throw new Error("Kindle Library: itemsList not found in itemViewResponse");
     }
@@ -199,7 +210,10 @@ function parseSeriesItemsFromHtml(html: string): SeriesItem[] {
 export async function fetchSeriesInfo(
   seriesAsin: string,
   cookieString: string,
+  visited = new Set<string>(),
 ): Promise<SeriesInfo> {
+  if (visited.has(seriesAsin)) throw new Error("Kindleシリーズのリンクが循環しています");
+  visited.add(seriesAsin);
   const headers = { ...AMAZON_HEADERS, Cookie: cookieString };
 
   // 1. Fetch the series page
@@ -212,10 +226,7 @@ export async function fetchSeriesInfo(
   if (!res.ok) throw new Error(`Series page fetch failed: HTTP ${res.status}`);
   const html = await res.text();
 
-  // Detect actual sign-in page (not navigation links containing /ap/signin)
-  if (html.includes('id="ap_email"') || html.includes('name="signIn"')) {
-    throw new Error("Kindleセッションが無効です。再ログインしてください");
-  }
+  checkAmazonPage(html, res.url);
 
   const $ = cheerio.load(html);
   const seriesTitle =
@@ -280,7 +291,7 @@ export async function fetchSeriesInfo(
       const linkedAsin = href.match(/\/dp\/([A-Z0-9]{10})/)?.[1];
       if (linkedAsin && linkedAsin !== seriesAsin) {
         log.info(`Detected series ASIN ${linkedAsin} from product page ${seriesAsin}`);
-        return fetchSeriesInfo(linkedAsin, cookieString);
+        return fetchSeriesInfo(linkedAsin, cookieString, visited);
       }
     }
 
@@ -289,6 +300,9 @@ export async function fetchSeriesInfo(
       const titleText =
         $("span#productTitle, span#ebooksProductTitle").first().text().trim() ||
         seriesTitle;
+      if (!titleText || !$("#productTitle, #ebooksProductTitle").length) {
+        throw new Error("Kindleの商品情報を取得できません。商品・シリーズページのURLを確認してください");
+      }
       allItems = [
         {
           index: 1,
@@ -325,12 +339,17 @@ export async function fetchSeriesInfo(
         signal: AbortSignal.timeout(30000),
       });
       if (!pageRes.ok) {
-        log.warn(`Series page ${page} failed: HTTP ${pageRes.status}`);
-        continue;
+        throw new Error(`Kindleシリーズの${page}ページ目を取得できません: HTTP ${pageRes.status}`);
       }
       const pageHtml = await pageRes.text();
+      checkAmazonPage(pageHtml, pageRes.url);
       allItems.push(...parseSeriesItemsFromHtml(pageHtml));
     }
+  }
+
+  allItems = [...new Map(allItems.map((item) => [item.asin, item])).values()];
+  if (!allItems.length || (totalItems > 0 && allItems.length !== totalItems)) {
+    throw new Error(`Kindleシリーズの巻情報が不完全です（${allItems.length}/${totalItems}巻）。再試行してください`);
   }
 
   log.info(
@@ -353,30 +372,33 @@ export class KindleMetadata implements MetadataProvider {
     const cookies = extractCookies(session ?? null);
     const cookieString = buildCookieString(cookies);
 
-    // Fetch library to determine which ASINs are NOT manga
-    // (items not in library are assumed to be manga — they may be free/unpurchased)
-    const libraryItems = await fetchLibraryItems(cookies);
-    const nonMangaAsins = new Set(
-      libraryItems.filter((i) => !i.mangaOrComicAsin).map((i) => i.asin),
-    );
-
-    // Try series page scraping first — works for both series ASINs and
-    // individual volume ASINs that redirect to their series page.
+    // Product/series pages are the primary source. The old Kindle library now
+    // redirects to Your Books for some accounts and must not block registration.
+    let series: SeriesInfo | undefined;
+    let seriesError: unknown;
     try {
-      const series = await fetchSeriesInfo(asin, cookieString);
-      if (series.items.length > 0) {
-        return this.seriesToTitleInfo(series, nonMangaAsins);
-      }
-    } catch (e: any) {
-      // "not manga" errors are definitive — don't fall back to library
-      if (e.message.includes("マンガ形式の巻がない") || e.message.includes("マンガではない")) {
-        throw e;
-      }
-      log.warn(`Series page fetch failed for ${asin}, falling back to library: ${e.message}`);
+      series = await fetchSeriesInfo(asin, cookieString);
+    } catch (error) {
+      if (error instanceof KindleAccessError) throw error;
+      seriesError = error;
     }
 
-    // Fallback: library-based lookup (for individual ASINs not on a series page)
-    return this.getTitleInfoFromLibrary(asin, cookies, nonMangaAsins);
+    let libraryItems: KindleItem[];
+    try {
+      libraryItems = await fetchLibraryItems(cookies);
+    } catch (error) {
+      if (!series) throw seriesError ?? error;
+      log.warn("Kindle library enrichment unavailable; using product/series metadata");
+      libraryItems = [];
+    }
+    const nonMangaAsins = new Set(
+      libraryItems.filter((i) => i.mangaOrComicAsin === false).map((i) => i.asin),
+    );
+    if (series) return this.seriesToTitleInfo(series, nonMangaAsins);
+    if (!libraryItems.some((item) => item.asin === asin || item.seriesAsin === asin)) {
+      throw seriesError;
+    }
+    return this.getTitleInfoFromLibrary(asin, libraryItems);
   }
 
   private seriesToTitleInfo(series: SeriesInfo, nonMangaAsins: Set<string>): TitleInfo {
@@ -433,10 +455,9 @@ export class KindleMetadata implements MetadataProvider {
     };
   }
 
-  private async getTitleInfoFromLibrary(asin: string, cookies: CookieData[], nonMangaAsins: Set<string>): Promise<TitleInfo> {
-    const items = await fetchLibraryItems(cookies);
-
-    const targetItem = items.find((item) => item.asin === asin);
+  private getTitleInfoFromLibrary(asin: string, items: KindleItem[]): TitleInfo {
+    const targetItem = items.find((item) => item.asin === asin) ??
+      items.find((item) => item.seriesAsin === asin && item.mangaOrComicAsin);
     if (!targetItem) {
       throw new Error(
         `ASIN ${asin} がKindleライブラリに見つかりません。購入済みか確認してください`,

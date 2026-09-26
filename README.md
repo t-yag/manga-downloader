@@ -13,6 +13,19 @@
 | momonga | momon:GA | 不要 | |
 | nhentai | nhentai | 不要 | |
 
+### Kindleの作品追加
+
+設定画面でKindleアカウントにログインした後、画面下部に商品・シリーズページのURL
+（`https://www.amazon.co.jp/dp/ASIN`）を入力してください。
+マンガのビューアURL（`https://read.amazon.co.jp/manga/ASIN`、
+`https://read.amazon.co.jp/kindle-library/manga-wr/ASIN`）にも対応しています。
+本棚のトップページやAmazonの短縮URLは作品を特定できないため、そのままでは追加できません。
+
+作品・巻情報は商品／シリーズページから取得します。旧Kindleライブラリが新しい「本棚」に
+移行していても追加できます。旧ライブラリの情報が取得できない場合、小説などを除外する
+事前判定は利用できません。ダウンロード対応は引き続きマンガのビューアに限られます。
+CAPTCHAや再ログインが必要な場合は、表示された案内に従ってから再試行してください。
+
 ## 技術スタック
 
 - **バックエンド**: TypeScript + Fastify + Drizzle ORM + SQLite
