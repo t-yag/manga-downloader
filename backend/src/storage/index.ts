@@ -24,7 +24,7 @@ interface PathTemplateVars {
 function sanitize(value: string): string {
   return value
     .replace(/[<>:"\/\\|?*]/g, "_")
-    .replace(/\s+/g, "_")
+    .replace(/\s+/g, " ")
     .substring(0, 100);
 }
 
