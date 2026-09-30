@@ -49,19 +49,21 @@ CAPTCHAや再ログインが必要な場合は、表示された案内に従っ�
 
 ```bash
 # 全体起動（backend + frontend）
-docker-compose up -d
+./scripts/start.sh
 
 # バックエンドのみ
-docker-compose up -d backend
+docker compose up -d backend
 
 # フロントエンドのみ
-docker-compose up -d frontend
+docker compose up -d frontend
 
 # 停止
-docker-compose down
+./scripts/stop.sh
 ```
 
-| URL | 用途 |
+`./scripts/start.sh` は起動に成功すると Web UI の URL を表示します。公開ポートは Docker Compose から取得するため、`.env` の `FRONTEND_PORT` を変更した場合も変更後のポートが表示されます。
+
+| デフォルトの URL | 用途 |
 |-----|------|
 | `http://localhost:3000` | バックエンド API |
 | `http://localhost:8080` | フロントエンド Web UI |
