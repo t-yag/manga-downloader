@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { registry } from "../../plugins/registry.js";
 import fs from "fs/promises";
 import path from "path";
+import { BookLiveAuth } from "../../plugins/booklive/auth.js";
+import { normalizeImportedCookies } from "../../plugins/import-cookies.js";
 
 /** Check if a cookie file exists and read basic session info */
 async function getSessionStatus(
@@ -201,11 +203,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   // Import cookies from structured auth cookie data
   app.post("/api/accounts/:id/import-cookies", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { cookies: inputCookies } = request.body as {
-      cookies: Array<{ name: string; value: string; expires?: string }>;
+    const { cookies: inputCookies, cookieHeader } = request.body as {
+      cookies?: unknown;
+      cookieHeader?: string;
     };
 
-    if (!Array.isArray(inputCookies) || inputCookies.length === 0) {
+    if ((!Array.isArray(inputCookies) || inputCookies.length === 0) && !cookieHeader?.trim()) {
       return reply.status(400).send({ error: "cookies array is required" });
     }
 
@@ -231,36 +234,35 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       const domain = plugin.manifest.authDomain
         ?? (plugin.manifest.authUrl ? "." + new URL(plugin.manifest.authUrl).hostname.replace(/^www\./, "") : "");
 
-      const cookies = inputCookies
-        .filter((c) => c.name && c.value)
-        .map((c) => ({
-          name: c.name,
-          value: c.value,
-          domain,
-          path: "/",
-          expires: c.expires ? Math.floor(new Date(c.expires).getTime() / 1000) : -1,
-        }));
+      let cookies;
+      try {
+        cookies = normalizeImportedCookies(inputCookies, domain,
+          account.pluginId === "booklive" ? cookieHeader : undefined);
+      } catch (error) {
+        return reply.status(400).send({ error: (error as Error).message });
+      }
 
       if (cookies.length === 0) {
         return reply.status(400).send({ error: "No valid cookies provided" });
       }
 
-      // Save cookie file
+      // Validate a candidate before replacing the last saved session.
       const cookieDir = path.dirname(account.cookiePath);
       await fs.mkdir(cookieDir, { recursive: true });
-      await fs.writeFile(
-        account.cookiePath,
-        JSON.stringify(cookies, null, 2),
-        "utf-8",
-      );
-
-      // Validate the imported session
-      await plugin.auth.loadSession(account.cookiePath);
-      const valid = await plugin.auth.validateSession();
-
-      if (!valid) {
-        // Remove invalid cookie file so the account doesn't appear as "logged in"
-        await fs.unlink(account.cookiePath).catch(() => {});
+      const candidate = account.cookiePath + ".import-" + crypto.randomUUID();
+      const auth = account.pluginId === "booklive" ? new BookLiveAuth() : plugin.auth;
+      let valid = false;
+      try {
+        await fs.writeFile(candidate, JSON.stringify(cookies, null, 2), { mode: 0o600 });
+        await auth.loadSession(candidate);
+        valid = await auth.validateSession();
+        if (valid) {
+          await fs.rename(candidate, account.cookiePath);
+          await plugin.auth.loadSession(account.cookiePath);
+        }
+      } finally {
+        await fs.rm(candidate, { force: true });
+        if (!valid && account.pluginId !== "booklive") await plugin.auth.loadSession(account.cookiePath);
       }
 
       db.update(schema.accounts)
@@ -274,7 +276,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         cookieCount: cookies.length,
         message: valid
           ? `${cookies.length}個のCookieをインポートしました（セッション有効）`
-          : `Cookieが無効です。正しい値か確認してください`,
+          : `BookLiveなど接続先で認証できませんでした。ログイン済みブラウザのCookie一式を確認してください（保存済みCookieは変更していません）`,
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

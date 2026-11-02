@@ -7,6 +7,7 @@
  */
 
 import fs from "fs/promises";
+import { validateBookLiveCookies } from "./session.js";
 import { logger } from "../../logger.js";
 import { launchBrowser } from "../browser.js";
 import type {
@@ -106,10 +107,8 @@ export class BookLiveAuth implements AuthProvider {
       const cdpClient = await page.createCDPSession();
       const hasAuthCookies = async (): Promise<boolean> => {
         const { cookies } = await cdpClient.send("Network.getAllCookies");
-        return cookies.some(
-          (c: any) =>
-            c.name === "BL_MEM" && c.domain.includes("booklive.jp"),
-        );
+        return validateBookLiveCookies(cookies.filter((c: any) =>
+          c.domain === "booklive.jp" || c.domain.endsWith(".booklive.jp")));
       };
 
       const deadline = Date.now() + LOGIN_TIMEOUT_MS;
@@ -140,7 +139,7 @@ export class BookLiveAuth implements AuthProvider {
 
       // Keep only .booklive.jp cookies
       const blCookies = cookies.filter(
-        (c: any) => c.domain.includes("booklive.jp"),
+        (c: any) => (c.domain === "booklive.jp" || c.domain.endsWith(".booklive.jp")),
       );
 
       if (blCookies.length === 0) {
@@ -175,22 +174,9 @@ export class BookLiveAuth implements AuthProvider {
 
     log.info("Validating session...");
 
-    // Check for essential auth cookie
-    const sessionCookie = this.session.cookies.find((c) => c.name === "PHPSESSID");
-    if (!sessionCookie) {
-      log.warn("Session invalid: PHPSESSID cookie not found");
-      return false;
-    }
-
-    // Check cookie expiry
-    const now = Date.now() / 1000;
-    if (sessionCookie.expires && sessionCookie.expires > 0 && sessionCookie.expires < now) {
-      log.warn("Session invalid: PHPSESSID cookie expired");
-      return false;
-    }
-
-    log.info("Session valid");
-    return true;
+    const valid = await validateBookLiveCookies(this.session.cookies);
+    log.info(valid ? "Session authenticated by BookLive" : "BookLive rejected session");
+    return valid;
   }
 
   getSession(): SessionData | null {
@@ -201,10 +187,15 @@ export class BookLiveAuth implements AuthProvider {
     try {
       const data = await fs.readFile(cookiePath, "utf-8");
       const cookies = JSON.parse(data);
+      if (!Array.isArray(cookies) || !cookies.every(c => typeof c.name === "string" && typeof c.value === "string")) {
+        this.session = null;
+        return false;
+      }
       this.session = { cookies };
       log.info(`Session loaded: ${cookies.length} cookies`);
       return true;
     } catch (error: any) {
+      this.session = null;
       if (error.code === "ENOENT") {
         log.info("No saved session found");
       } else {

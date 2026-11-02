@@ -92,6 +92,9 @@ async function forceRelogin(
 
   log.info(`Force re-login for account #${account.id}...`);
   const credentials = JSON.parse(account.credentials ?? "{}");
+  if (!Object.values(credentials).some(value => typeof value === "string" && value.trim())) {
+    throw new Error("認証が無効です。アカウント設定からCookie一式を再インポートしてください");
+  }
   const success = await plugin.auth.login(credentials);
   if (!success) {
     throw new Error("ログインに失敗しました。認証情報を確認してください");
