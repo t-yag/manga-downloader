@@ -331,10 +331,10 @@ export function clearAccountSession(id: number) {
   });
 }
 
-export function importCookies(id: number, cookies: Array<{ name: string; value: string; expires?: string }>) {
+export function importCookies(id: number, cookies: Array<{ name: string; value: string; expires?: string }>, cookieHeader?: string) {
   return request<{ success: boolean; valid: boolean; cookieCount: number; message: string }>(
     `/api/accounts/${id}/import-cookies`,
-    { method: "POST", body: JSON.stringify({ cookies }) },
+    { method: "POST", body: JSON.stringify({ cookies, cookieHeader }) },
   );
 }
 

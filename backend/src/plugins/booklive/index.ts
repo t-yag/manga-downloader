@@ -1,3 +1,4 @@
+import { validateBookLiveCookies } from "./session.js";
 import type {
   Plugin,
   Downloader,
@@ -84,6 +85,10 @@ class BookLiveAvailabilityChecker implements AvailabilityChecker {
     volumes: VolumeQuery[],
     session: SessionData | null
   ): Promise<VolumeAvailability[]> {
+    if (!session || !(await validateBookLiveCookies(session.cookies))) {
+      throw new Error("BookLiveの認証が無効です。Cookie一式を再インポートしてください");
+    }
+
     const cookieString = session?.cookies
       ?.map((c) => `${c.name}=${c.value}`)
       .join("; ") ?? "";
@@ -254,7 +259,7 @@ export function createBookLivePlugin(): Plugin {
       version: "1.0.0",
       contentType: "series",
       loginMethods: ["credentials", "browser", "cookie_import"],
-      authCookieNames: ["PHPSESSID"],
+      authCookieNames: ["PHPSESSID", "BL_MEM"],
       authUrl: "https://booklive.jp/login",
       authDomain: ".booklive.jp",
       supportedFeatures: {

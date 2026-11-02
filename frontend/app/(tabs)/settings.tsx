@@ -259,13 +259,13 @@ export default function SettingsScreen() {
           // Auto-import the cookies that were already filled in
           try {
             const cookieArray = Object.entries(cookieValues)
-              .filter(([, v]) => v.trim())
+              .filter(([name, v]) => name !== "__header" && v.trim())
               .map(([name, value]) => ({
                 name,
                 value: value.trim(),
                 expires: cookieExpires[name]?.trim() || undefined,
               }));
-            const result = await importCookies(account.id, cookieArray);
+            const result = await importCookies(account.id, cookieArray, cookieValues.__header);
             if (result.valid) {
               setCookieValues({});
               setCookieExpires({});
@@ -308,13 +308,13 @@ export default function SettingsScreen() {
   const importCookiesMutation = useMutation({
     mutationFn: (accountId: number) => {
       const cookieArray = Object.entries(cookieValues)
-        .filter(([, v]) => v.trim())
+        .filter(([name, v]) => name !== "__header" && v.trim())
         .map(([name, value]) => ({
           name,
           value: value.trim(),
           expires: cookieExpires[name]?.trim() || undefined,
         }));
-      return importCookies(accountId, cookieArray);
+      return importCookies(accountId, cookieArray, cookieValues.__header);
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
@@ -912,7 +912,7 @@ export default function SettingsScreen() {
                           {/* Cookie import */}
                           {loginMethodTab === "cookie_import" && (() => {
                             const cookieNames = p.authCookieNames ?? [];
-                            const hasCookieData = cookieNames.some((n) => cookieValues[n]?.trim());
+                            const hasCookieData = cookieNames.some((n) => cookieValues[n]?.trim()) || (p.id === "booklive" && !!cookieValues.__header?.trim());
                             return (
                               <>
                                 <View style={styles.cookieHintBlock}>
@@ -934,6 +934,22 @@ export default function SettingsScreen() {
                                     {"2. DevTools > Application > Cookies から以下の Value と Expires をコピー"}
                                   </Text>
                                 </View>
+                                {p.id === "booklive" && (
+                                  <View style={styles.cookieFieldGroup}>
+                                    <Text style={styles.cookieFieldLabel}>Cookieヘッダー一式（推奨）</Text>
+                                    <Text style={styles.cookieHint}>ログイン済みBookLiveの商品ページでDevToolsのNetworkを開き、再読み込み後のリクエストのRequest HeadersにあるCookieの値を貼り付けてください。下の個別入力より優先されます。</Text>
+                                    <TextInput
+                                      style={styles.input}
+                                      placeholder="name=value; name=value; ..."
+                                      placeholderTextColor={colors.textMuted}
+                                      value={cookieValues.__header ?? ""}
+                                      onChangeText={(v) => setCookieValues(prev => ({ ...prev, __header: v }))}
+                                      secureTextEntry
+                                      autoCapitalize="none"
+                                      autoCorrect={false}
+                                    />
+                                  </View>
+                                )}
                                 {cookieNames.map((name) => (
                                   <View key={name} style={styles.cookieFieldGroup}>
                                     <Text style={styles.cookieFieldLabel}>{name}</Text>
@@ -941,6 +957,8 @@ export default function SettingsScreen() {
                                       style={styles.input}
                                       placeholder="Value"
                                       placeholderTextColor={colors.textMuted}
+                                      secureTextEntry
+                                      autoCorrect={false}
                                       value={cookieValues[name] ?? ""}
                                       onChangeText={(v) => setCookieValues((prev) => ({ ...prev, [name]: v }))}
                                       autoCapitalize="none"
